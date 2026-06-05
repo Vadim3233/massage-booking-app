@@ -1,0 +1,17 @@
+How to open this project next time
+
+1. Open this folder:
+   C:\Projects\massage-booking-app
+
+2. Double-click:
+   Open Chain Scheduler.bat
+
+3. Leave the black server window open while using the app.
+
+4. The app opens at:
+   http://127.0.0.1:5173/
+
+To stop the app, close the black server window or press Ctrl+C inside it.
+
+If the app says the built files are missing, open this project in Codex and ask:
+Build the project so I can open it next time.

@@ -1,0 +1,25 @@
+{
+  "name": "chain-scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "node server/server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node src/schedulingEngine.test.js && node src/lib/bookingBasket.test.js",
+    "test:engine": "node src/schedulingEngine.test.js",
+    "test:basket": "node src/lib/bookingBasket.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
+    "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "^1.17.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  }
+}
