@@ -8,9 +8,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/schedulingEngine.test.js && node src/lib/bookingBasket.test.js",
+    "test": "node src/schedulingEngine.test.js && node src/lib/bookingBasket.test.js && node src/lib/clientData.test.js && node src/lib/bookingSupabase.test.js && node src/lib/apiSecretProtection.test.js && node src/lib/securitySchema.test.js",
     "test:engine": "node src/schedulingEngine.test.js",
-    "test:basket": "node src/lib/bookingBasket.test.js"
+    "test:basket": "node src/lib/bookingBasket.test.js",
+    "test:client-data": "node src/lib/clientData.test.js",
+    "test:security-schema": "node src/lib/securitySchema.test.js",
+    "test:migration": "node scripts/validate-security-migration.mjs",
+    "test:migration:rebuild": "node scripts/validate-rebuild-client-security.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
@@ -21,5 +25,8 @@
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.1"
   }
 }

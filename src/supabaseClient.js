@@ -15,6 +15,27 @@ export async function getCurrentSession() {
   return data.session;
 }
 
+
+export async function signInClientWithGoogle(redirectTo) {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function isCurrentUserBookingAdmin() {
+  const { data, error } = await supabase.rpc("current_user_is_booking_admin");
+  if (error) throw error;
+  return Boolean(data);
+}
+
+export async function signOutCurrentUser() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
 export async function signInAdmin(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
@@ -22,8 +43,7 @@ export async function signInAdmin(email, password) {
 }
 
 export async function signOutAdmin() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  return signOutCurrentUser();
 }
 
 export async function requestAdminPasswordRecovery(email, redirectTo) {

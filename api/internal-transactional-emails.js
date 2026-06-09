@@ -1,5 +1,3 @@
-import { sendTransactionalEmail } from "../server/emailProvider.js";
-
 function normalizeOriginHost(value = "") {
   try {
     return new URL(value).host.toLowerCase();
@@ -33,24 +31,10 @@ function setCorsHeaders(request, response) {
   response.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
 }
 
-function normalizeBody(body) {
-  if (!body) return {};
-  if (typeof body === "string") {
-    try {
-      return JSON.parse(body);
-    } catch {
-      return {};
-    }
-  }
-  return body;
-}
-
-function hasValidInternalApiSecret(request) {
-  return (
-    typeof process.env.INTERNAL_API_SECRET === "string"
-    && process.env.INTERNAL_API_SECRET !== ""
-    && request.headers["x-internal-api-secret"] === process.env.INTERNAL_API_SECRET
-  );
+function getSelfBaseUrl(request) {
+  const host = request.headers.host || "127.0.0.1:8787";
+  const proto = request.headers["x-forwarded-proto"] || "http";
+  return `${proto}://${host}`;
 }
 
 export default async function handler(request, response) {
@@ -66,18 +50,29 @@ export default async function handler(request, response) {
     return;
   }
 
-  if (!hasValidInternalApiSecret(request)) {
+  if (!isAllowedOrigin(request)) {
     response.status(403).json({ error: "Forbidden", sent: false });
     return;
   }
 
+  if (!process.env.INTERNAL_API_SECRET) {
+    response.status(500).json({ error: "Server misconfigured", sent: false });
+    return;
+  }
+
   try {
-    const result = await sendTransactionalEmail(normalizeBody(request.body));
-    response.status(200).json(result);
-  } catch (error) {
-    response.status(400).json({
-      error: error instanceof Error ? error.message : "Unable to send transactional email",
-      sent: false,
+    const proxyResponse = await fetch(`${getSelfBaseUrl(request)}/api/transactional-emails`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-api-secret": process.env.INTERNAL_API_SECRET,
+      },
+      body: JSON.stringify(request.body || {}),
     });
+
+    const result = await proxyResponse.json().catch(() => ({}));
+    response.status(proxyResponse.status).json(result);
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Internal proxy failed", sent: false });
   }
 }

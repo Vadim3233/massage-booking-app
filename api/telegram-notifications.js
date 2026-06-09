@@ -1,7 +1,7 @@
-import { sendTelegramTestMessage } from "../server/telegramProvider.js";
+import { isAllowedTelegramEventType, sendAdminTelegramNotification } from "../server/telegramProvider.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 10;
+const RATE_LIMIT_MAX_REQUESTS = 20;
 const rateLimitBuckets = new Map();
 
 function normalizeOriginHost(value = "") {
@@ -53,7 +53,15 @@ function setCorsHeaders(request, response) {
     response.setHeader("Vary", "Origin");
   }
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+}
+
+function hasValidInternalApiSecret(request) {
+  return (
+    typeof process.env.INTERNAL_API_SECRET === "string"
+    && process.env.INTERNAL_API_SECRET !== ""
+    && request.headers["x-internal-api-secret"] === process.env.INTERNAL_API_SECRET
+  );
 }
 
 export default async function handler(request, response) {
@@ -64,37 +72,51 @@ export default async function handler(request, response) {
     return;
   }
 
-  if (!["GET", "POST"].includes(request.method)) {
+  if (request.method !== "POST") {
     response.status(405).json({ error: "Method not allowed", sent: false });
     return;
   }
 
-  if (!isAllowedOrigin(request)) {
-    console.warn("Telegram test rejected: disallowed origin", { origin: request.headers.origin });
+  if (!hasValidInternalApiSecret(request)) {
     response.status(403).json({ error: "Forbidden", sent: false });
     return;
   }
 
   if (isRateLimited(request)) {
-    console.warn("Telegram test rejected: rate limited", { client: clientKey(request) });
-    response.status(429).json({ error: "Too many Telegram test requests", sent: false });
+    console.warn("Telegram notification rejected: rate limited", { client: clientKey(request) });
+    response.status(429).json({ error: "Too many Telegram notification requests", sent: false });
+    return;
+  }
+
+  const type = request.body?.type ?? "notification";
+  if (!isAllowedTelegramEventType(type)) {
+    console.warn("Telegram notification rejected: unsupported type", { type });
+    response.status(400).json({ error: "Unsupported Telegram notification type", sent: false });
     return;
   }
 
   try {
-    const result = await sendTelegramTestMessage();
+    const result = await sendAdminTelegramNotification({
+      payload: request.body?.payload ?? {},
+      type,
+    });
     if (result.sent === false) {
-      console.error("Telegram test skipped", { reason: result.reason });
+      console.error("Telegram admin notification skipped", { type, reason: result.reason });
       response.status(400).json(result);
       return;
     }
+    console.info("Telegram admin notification sent", {
+      messageId: result.messageId,
+      type,
+    });
     response.status(200).json(result);
   } catch (error) {
-    console.error("Telegram test failed", {
+    console.error("Telegram admin notification failed", {
       error: error instanceof Error ? error.message : String(error),
+      type,
     });
     response.status(400).json({
-      error: error instanceof Error ? error.message : "Unable to send Telegram test message",
+      error: error instanceof Error ? error.message : "Unable to send Telegram notification",
       sent: false,
     });
   }

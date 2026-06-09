@@ -130,11 +130,36 @@ export const emailTemplates = {
         <h2 style="font-size:18px;">Services booked</h2>
         <ul>${renderLineItems(payload.items)}</ul>
       `;
+    const isPending = (
+      payload.status === "pending_payment_verification" ||
+      payload.status === "payment_method_review" ||
+      payload.paymentStatus === "awaiting_verification" ||
+      payload.paymentStatus === "bank transfer pending" ||
+      payload.paymentStatus === "cash_on_arrival" ||
+      payload.paymentStatus === "alternative_requested"
+    );
+    const isAlternative = (
+      payload.paymentMethod === "alternative_requested" ||
+      payload.paymentStatus === "alternative_requested" ||
+      (payload.status === "payment_method_review" && payload.paymentMethod === "alternative_requested")
+    );
+
+    const paymentInstructions = `
+      <h2 style="font-size:18px;">Payment details</h2>
+      <ul>
+        <li><strong>Reference:</strong> ${escapeHtml(payload.bookingReference || payload.bookingReference || payload.orderId || payload.id || "-")}</li>
+        <li><strong>Amount due:</strong> ${formatMoney(payload.total)}</li>
+        <li><strong>Bank:</strong> VAD Massage — Account: 12345678 — Sort: 12-34-56</li>
+        <li><strong>Wise:</strong> Payment link placeholder</li>
+      </ul>
+    `;
+
     const body = `
       <p>Hi ${escapeHtml(customerName)},</p>
-      <p>${appointments.length > 1 ? "Your appointments are confirmed." : "Your booking is confirmed."}</p>
+      <p>${isPending ? "We have received your booking request. Your appointment is reserved while payment is being completed." : isAlternative ? "We have received your request for an alternative payment method. Our team will review it and be in touch." : (appointments.length > 1 ? "Your appointments are confirmed." : "Your booking is confirmed.")}</p>
       ${appointmentsBody}
       <p><strong>Total:</strong> ${formatMoney(payload.total)}</p>
+      ${isPending ? paymentInstructions : isAlternative ? `<p>We will contact you regarding alternative payment arrangements.</p>${paymentInstructions}` : ""}
       <p style="margin:24px 0;">
         <a href="${changeRequestUrl}" style="background:#0d77d8;color:#ffffff;display:inline-block;padding:12px 18px;text-decoration:none;">
           Request change or cancellation
@@ -151,12 +176,20 @@ export const emailTemplates = {
       </p>
     `;
 
+    const subject = isPending ? "Booking request received — awaiting payment verification" : isAlternative ? "Alternative payment request received" : (appointments.length > 1 ? "Your appointments are confirmed" : "Your booking is confirmed");
+
+    const text = isPending
+      ? `Your booking request has been received for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. Amount due: ${formatMoney(payload.total)}. Your appointment will be confirmed once payment has been received and verified.`
+      : isAlternative
+        ? `Your alternative payment request has been received for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. We'll review and be in touch.`
+        : (appointments.length > 1
+          ? `Your appointments are confirmed. Total: ${formatMoney(payload.total)}.`
+          : `Your booking is confirmed for ${payload.date} at ${payload.time}. Total: ${formatMoney(payload.total)}.`);
+
     return {
-      html: layout("Booking confirmed", body),
-      subject: appointments.length > 1 ? "Your appointments are confirmed" : "Your booking is confirmed",
-      text: appointments.length > 1
-        ? `Your appointments are confirmed. Total: ${formatMoney(payload.total)}. To change or cancel, reply to this email or email bookings@vadmassage.com.`
-        : `Your booking is confirmed for ${payload.date} at ${payload.time}. Total: ${formatMoney(payload.total)}. To change or cancel, reply to this email or email bookings@vadmassage.com.`,
+      html: layout(subject, body),
+      subject,
+      text,
     };
   },
 

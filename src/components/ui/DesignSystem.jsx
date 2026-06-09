@@ -3,7 +3,6 @@ import {
   Activity,
   CalendarDays,
   CheckCircle2,
-  Clock3,
   HeartPulse,
   Home,
   Leaf,
@@ -90,7 +89,6 @@ export function ServiceCard({
   onFullDescription,
 }) {
   const Icon = serviceIconMap[service.id] ?? Sparkles;
-  const durationCopy = "60 / 90 / 120 min";
 
   return (
     <article
@@ -106,16 +104,6 @@ export function ServiceCard({
           <small>{service.shortDescription}</small>
         </span>
       </button>
-      <div className="premium-service-meta">
-        <span>
-          <Clock3 size={15} aria-hidden="true" />
-          {durationCopy}
-        </span>
-        <b>From {"\u00a3"}{service.price}</b>
-      </div>
-      {selectedMinutes > 0 && (
-        <StatusBadge tone="success">{selectedMinutes} minutes selected</StatusBadge>
-      )}
       <button
         type="button"
         className="premium-service-description"

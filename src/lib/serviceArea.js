@@ -30,13 +30,6 @@ async function lookupPostcodeCoordinates(postcode) {
   try {
     const response = await fetch(`${POSTCODES_IO_BASE_URL}/${encodeURIComponent(normalizedPostcode)}`);
 
-    if (import.meta.env.DEV) {
-      console.log("[service-area] postcode lookup", {
-        postcode: normalizedPostcode,
-        status: response.status,
-      });
-    }
-
     if (!response.ok) {
       return { ok: false, reason: "invalid_postcode" };
     }
@@ -51,11 +44,7 @@ async function lookupPostcodeCoordinates(postcode) {
     }
 
     return { ok: true, postcode: normalizedPostcode, lat, lng };
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.log("[service-area] postcode lookup failed", error);
-    }
-
+  } catch {
     return { ok: false, reason: "lookup_failed" };
   }
 }
@@ -65,15 +54,6 @@ export async function checkPostcodeInServiceArea(postcode) {
   if (!lookup.ok) return lookup;
 
   const inside = booleanPointInPolygon(point([lookup.lng, lookup.lat]), serviceAreaPolygon);
-
-  if (import.meta.env.DEV) {
-    console.log("[service-area] polygon result", {
-      postcode: lookup.postcode,
-      lat: lookup.lat,
-      lng: lookup.lng,
-      inside,
-    });
-  }
 
   return { ...lookup, inside };
 }
@@ -87,16 +67,6 @@ export async function checkPostcodeInSelectedWorkingZones(postcode, activeZoneId
   const postcodePoint = point([lookup.lng, lookup.lat]);
   const matchedZones = activeZones.filter((zone) => booleanPointInPolygon(postcodePoint, zone.polygon));
   const inside = matchedZones.length > 0;
-
-  if (import.meta.env.DEV) {
-    console.log("[service-area] selected zone result", {
-      postcode: lookup.postcode,
-      lat: lookup.lat,
-      lng: lookup.lng,
-      inside,
-      matchedZones: matchedZones.map((zone) => zone.id),
-    });
-  }
 
   return {
     ...lookup,

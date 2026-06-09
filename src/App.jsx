@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_DAY_SETTINGS,
   DEFAULT_SERVICES,
@@ -19,6 +19,30 @@ import {
   validateBasketAppointments,
 } from "./lib/bookingBasket.js";
 import { sanitizeServiceAreas, serviceAreas as DEFAULT_SERVICE_AREAS } from "./lib/serviceAreas.js";
+import {
+  buildBookingClientLink,
+  ensureCurrentClientBookingAddress,
+  getCurrentClientProfile,
+  loadCurrentClientBookingContext,
+  profileInputFromAuthUser,
+  updateCurrentClientBookingDefaults,
+  upsertCurrentClientProfile,
+} from "./lib/clientData.js";
+import {
+  bookingToSupabasePayload,
+  bookingToLegacySupabasePayload,
+  normalizeStoredBooking,
+  paymentMethodToBookingStatus,
+  paymentMethodToPaymentStatus,
+  normalizeAdminBookingApprovalPatch,
+} from "./lib/bookingPersistence.js";
+import {
+  saveBookingToSupabase,
+  updateBookingInSupabase,
+  getSupabaseClient,
+} from "./lib/bookingSupabase.js";
+import { ClientAccountPanel } from "./components/Client/ClientAccountPanel.jsx";
+import { BookAgainPanel } from "./components/Client/BookAgainPanel.jsx";
 import { buildAdminCustomers } from "./components/Admin/adminCustomers.js";
 import { BusinessAnalyticsDashboard } from "./components/Admin/BusinessAnalyticsDashboard.jsx";
 import { AdminLogin } from "./components/Admin/AdminLogin.jsx";
@@ -113,20 +137,57 @@ function removeStoredValue(key) {
   }
 }
 
+const BOOKING_CONFIRM_TIMEOUT_MS = 15000;
+
+function logBookingConfirmation(stage, error = null) {
+  if (error) {
+    console.error(`[booking-confirm] ${stage}`, {
+      code: error?.code || null,
+      name: error?.name || "Error",
+    });
+    return;
+  }
+  console.info(`[booking-confirm] ${stage}`);
+}
+
+async function runSupabaseConfirmationOperation(operation, label) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, BOOKING_CONFIRM_TIMEOUT_MS);
+
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (timedOut || error?.name === "AbortError") {
+      throw new Error(`${label} timed out. Please check your connection and try again.`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function postTransactionalEmail(emailRequest) {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
   const endpoints = apiBaseUrl
-    ? [`${apiBaseUrl}/api/transactional-emails`]
-    : ["/api/transactional-emails", "http://127.0.0.1:8787/api/transactional-emails"];
+    ? [`${apiBaseUrl}/api/internal-transactional-emails`]
+    : ["/api/internal-transactional-emails", "http://127.0.0.1:8787/api/internal-transactional-emails"];
 
   let lastError = null;
 
   for (const endpoint of endpoints) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
     try {
       const response = await fetch(endpoint, {
         body: JSON.stringify(emailRequest),
         headers: { "Content-Type": "application/json" },
         method: "POST",
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -137,12 +198,57 @@ async function postTransactionalEmail(emailRequest) {
       return response.json();
     } catch (error) {
       lastError = error;
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
   throw lastError || new Error("Email API unavailable");
 }
 
+
+async function postTelegramNotification(type, payload = {}) {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
+  const endpoints = apiBaseUrl
+    ? [`${apiBaseUrl}/api/internal-telegram-notifications`]
+    : ["/api/internal-telegram-notifications", "http://127.0.0.1:8787/api/internal-telegram-notifications"];
+
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify({ payload, type }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        signal: controller.signal,
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok || result.sent === false) {
+        lastError = new Error(result.reason || result.error || `Telegram API returned ${response.status}`);
+        continue;
+      }
+
+      return result;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  throw lastError || new Error("Telegram API unavailable");
+}
+
+function notifyAdminTelegram(type, payload = {}) {
+  postTelegramNotification(type, payload).catch((error) => {
+    console.warn(`Telegram notification failed for ${type}`, error);
+  });
+}
 async function postTelegramTest() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
   const endpoints = [
@@ -202,47 +308,6 @@ function isFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function normalizeStoredBooking(booking) {
-  if (!booking || typeof booking !== "object") return null;
-  if (!booking.id || !booking.serviceId || !booking.serviceName) return null;
-
-  const startMinutes = isFiniteNumber(booking.startMinutes)
-    ? Number(booking.startMinutes)
-    : typeof booking.start === "string"
-      ? timeToMinutes(booking.start)
-      : null;
-
-  if (!isFiniteNumber(startMinutes) || !isFiniteNumber(booking.duration) || !isFiniteNumber(booking.travelBuffer)) return null;
-
-  return {
-    address: typeof booking.address === "string" ? booking.address : "",
-    congestionFee: isFiniteNumber(booking.congestionFee) ? Number(booking.congestionFee) : 0,
-    clientName: typeof booking.clientName === "string" ? booking.clientName : "",
-    customerEmail: typeof booking.customerEmail === "string" ? booking.customerEmail : "",
-    customerPhone: typeof booking.customerPhone === "string" ? booking.customerPhone : "",
-    id: String(booking.id),
-    items: Array.isArray(booking.items)
-      ? booking.items.map((item) => ({
-          minutes: isFiniteNumber(item.minutes) ? Number(item.minutes) : 0,
-          name: String(item.name ?? ""),
-          price: isFiniteNumber(item.price) ? Number(item.price) : 0,
-        })).filter((item) => item.name)
-      : [],
-    location: typeof booking.location === "string" ? booking.location : "",
-    kind: booking.kind === "personal" ? "personal" : "booking",
-    orderId: typeof booking.orderId === "string" ? booking.orderId : "",
-    paymentId: typeof booking.paymentId === "string" ? booking.paymentId : "",
-    price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
-    serviceId: String(booking.serviceId),
-    serviceName: String(booking.serviceName),
-    startMinutes,
-    telegramUpdates: Boolean(booking.telegramUpdates),
-    duration: Number(booking.duration),
-    travelFee: isFiniteNumber(booking.travelFee) ? Number(booking.travelFee) : 0,
-    travelBuffer: Math.max(0, Number(booking.travelBuffer)),
-  };
-}
-
 function engineBookingToStorageBooking(booking) {
   if (!booking || typeof booking !== "object") return null;
   if (!booking.id || !booking.serviceId || !booking.serviceName) return null;
@@ -261,9 +326,12 @@ function engineBookingToStorageBooking(booking) {
     clientName: typeof booking.clientName === "string" ? booking.clientName : "",
     customerEmail: typeof booking.customerEmail === "string" ? booking.customerEmail : "",
     customerPhone: typeof booking.customerPhone === "string" ? booking.customerPhone : "",
+    userId: typeof booking.userId === "string" ? booking.userId : "",
+    savedAddressId: typeof booking.savedAddressId === "string" ? booking.savedAddressId : "",
     id: String(booking.id),
     items: Array.isArray(booking.items)
       ? booking.items.map((item) => ({
+          id: String(item.id ?? item.serviceId ?? ""),
           minutes: isFiniteNumber(item.minutes) ? Number(item.minutes) : 0,
           name: String(item.name ?? ""),
           price: isFiniteNumber(item.price) ? Number(item.price) : 0,
@@ -336,6 +404,8 @@ function storageBookingToEngineBooking(booking) {
     clientName: normalized.clientName,
     customerEmail: normalized.customerEmail,
     customerPhone: normalized.customerPhone,
+    userId: normalized.userId,
+    savedAddressId: normalized.savedAddressId,
     id: normalized.id,
     items: normalized.items,
     kind: normalized.kind,
@@ -352,11 +422,6 @@ function storageBookingToEngineBooking(booking) {
     duration: normalized.duration,
     travelBuffer: normalized.travelBuffer,
   };
-}
-
-async function getSupabaseClient() {
-  const module = await import("./supabaseClient.js");
-  return module.supabase;
 }
 
 function serviceIdForName(serviceName) {
@@ -377,7 +442,12 @@ function supabaseRowToStorageBooking(row) {
 
   const savedBooking = normalizeStoredBooking(noteData.appBooking);
   if (savedBooking) {
-    return { ...savedBooking, id: String(row.id ?? savedBooking.id) };
+    return {
+      ...savedBooking,
+      id: String(row.id ?? savedBooking.id),
+      userId: typeof row.user_id === "string" ? row.user_id : savedBooking.userId,
+      savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : savedBooking.savedAddressId,
+    };
   }
 
   const serviceName = String(row.service ?? "Custom service");
@@ -391,6 +461,8 @@ function supabaseRowToStorageBooking(row) {
     clientName: typeof row.client_name === "string" ? row.client_name : "",
     customerEmail: typeof row.client_email === "string" ? row.client_email : "",
     customerPhone: typeof row.client_phone === "string" ? row.client_phone : "",
+    userId: typeof row.user_id === "string" ? row.user_id : "",
+    savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : "",
     id: String(row.id),
     items: [],
     kind: serviceIdForName(serviceName) === "personal-event" ? "personal" : "booking",
@@ -467,154 +539,33 @@ function writeBookingsCacheFromDays(days) {
   writeStoredJson(BOOKINGS_STORAGE_KEY, bookingsByDay);
 }
 
-function ensureSupabaseBookingId(booking) {
-  const currentId = String(booking.id ?? "");
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(currentId)) {
-    return currentId;
-  }
-
-  if (crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-
-  throw new Error("Could not create a secure booking id.");
-}
-
-function bookingToSupabasePayload(booking, status = "confirmed") {
-  const normalized = engineBookingToStorageBooking(booking);
-  if (!normalized) throw new Error("Booking could not be saved because it has invalid booking data.");
-  if (!booking.dateValue) throw new Error("Booking could not be saved because its date is missing.");
-  const isPersonal = normalized.kind === "personal";
-
-  return {
-    id: normalized.id,
-    order_id: normalized.orderId || null,
-    client_name: normalized.clientName || (isPersonal ? normalized.serviceName : "Guest"),
-    client_email: normalized.customerEmail || "not-provided@example.local",
-    client_phone: normalized.customerPhone || null,
-    service_id: normalized.serviceId,
-    service: normalized.serviceName,
-    service_name: normalized.serviceName,
-    date: booking.dateValue,
-    start_minutes: normalized.startMinutes,
-    end_minutes: normalized.startMinutes + normalized.duration,
-    duration_minutes: normalized.duration,
-    address: normalized.address || null,
-    postcode: normalized.location || null,
-    selected_area: normalized.location || null,
-    price: normalized.price || 0,
-    travel_fee: normalized.travelFee || 0,
-    congestion_fee: normalized.congestionFee || 0,
-    payment_id: normalized.paymentId || null,
-    status,
-    notes: JSON.stringify({ appBooking: normalized }),
-  };
-}
-
-function bookingToLegacySupabasePayload(booking, status = "confirmed") {
-  const normalized = engineBookingToStorageBooking(booking);
-  if (!normalized) throw new Error("Booking could not be saved because it has invalid booking data.");
-  if (!booking.dateValue) throw new Error("Booking could not be saved because its date is missing.");
-  const isPersonal = normalized.kind === "personal";
-
-  return {
-    id: normalized.id,
-    client_name: normalized.clientName || (isPersonal ? normalized.serviceName : "Guest"),
-    client_email: normalized.customerEmail || "not-provided@example.local",
-    client_phone: normalized.customerPhone || null,
-    service: normalized.serviceName,
-    date: booking.dateValue,
-    start_minutes: normalized.startMinutes,
-    duration_minutes: normalized.duration,
-    address: normalized.address || null,
-    postcode: normalized.location || null,
-    status,
-    notes: JSON.stringify({ appBooking: normalized }),
-  };
-}
-
-function shouldRetryLegacyBookingPayload(error) {
-  const message = String(error?.message ?? "").toLowerCase();
-  return message.includes("column") && (
-    message.includes("order_id") ||
-    message.includes("service_id") ||
-    message.includes("service_name") ||
-    message.includes("end_minutes") ||
-    message.includes("selected_area") ||
-    message.includes("price") ||
-    message.includes("travel_fee") ||
-    message.includes("congestion_fee") ||
-    message.includes("payment_id")
-  );
-}
-
 async function createOrderInSupabase(order) {
   const supabase = await getSupabaseClient();
-  const { error } = await supabase
-    .from("orders")
-    .insert({
-      id: order.id,
-      client_email: order.clientEmail || null,
-      client_name: order.clientName || null,
-      payment_id: order.paymentId,
-      payment_provider: order.paymentProvider,
-      payment_status: order.paymentStatus,
-      total_amount: order.totalAmount,
-    });
+  logBookingConfirmation("create_secure_order started");
+  const { data, error } = await runSupabaseConfirmationOperation(
+    (signal) => supabase
+      .rpc("create_secure_order", { order_payload: {
+        id: order.id,
+        user_id: order.userId || null,
+        client_email: order.clientEmail || null,
+        client_name: order.clientName || null,
+        payment_id: order.paymentId,
+        payment_provider: order.paymentProvider,
+        payment_status: order.paymentStatus,
+        total_amount: order.totalAmount,
+      } })
+      .abortSignal(signal),
+    "Creating the checkout order"
+  );
 
   if (error) {
-    console.warn("Supabase order insert failed. Booking records will still include order metadata.", error);
+    logBookingConfirmation("create_secure_order failed", error);
+    throw new Error(`Could not create the checkout order: ${error.message}`);
   }
-}
-
-async function saveBookingToSupabase(booking) {
-  const supabase = await getSupabaseClient();
-  const bookingId = ensureSupabaseBookingId(booking);
-  const bookingWithId = { ...booking, id: bookingId };
-  let { error } = await supabase
-    .from("bookings")
-    .insert(bookingToSupabasePayload(bookingWithId));
-
-  if (error && shouldRetryLegacyBookingPayload(error)) {
-    const retry = await supabase
-      .from("bookings")
-      .insert(bookingToLegacySupabasePayload(bookingWithId));
-    error = retry.error;
-  }
-
-  if (error) {
-    throw new Error(`Supabase booking insert failed: ${error.message}`);
-  }
-
-  return { id: bookingId };
-}
-
-async function updateBookingInSupabase(booking) {
-  const supabase = await getSupabaseClient();
-  let { data, error } = await supabase
-    .from("bookings")
-    .update(bookingToSupabasePayload(booking, booking.status || "confirmed"))
-    .eq("id", booking.id)
-    .select()
-    .single();
-
-  if (error && shouldRetryLegacyBookingPayload(error)) {
-    const retry = await supabase
-      .from("bookings")
-      .update(bookingToLegacySupabasePayload(booking, booking.status || "confirmed"))
-      .eq("id", booking.id)
-      .select()
-      .single();
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    throw new Error(`Supabase booking update failed: ${error.message}`);
-  }
-
+  logBookingConfirmation("create_secure_order succeeded");
   return data;
 }
+
 
 async function deleteBookingFromSupabase(bookingId) {
   const supabase = await getSupabaseClient();
@@ -809,15 +760,22 @@ function getPostcodeCoverage(postcode, coverageZones = DEFAULT_COVERAGE_ZONES) {
   };
 }
 
+function dateValueFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function weekdayLabelFromDate(date) {
+  return WEEK_DAYS[(date.getDay() + 6) % 7];
+}
+
 function dateValueForOffset(offset) {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() + offset);
-  return date.toISOString().slice(0, 10);
-}
-
-function dateValueFromDate(date) {
-  return date.toISOString().slice(0, 10);
+  return dateValueFromDate(date);
 }
 
 function addDaysToDateValue(dateValue, days) {
@@ -834,7 +792,7 @@ function monthValueForDate(dateValue) {
 function todayValue() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
-  return date.toISOString().slice(0, 10);
+  return dateValueFromDate(date);
 }
 
 function isPastDate(dateValue) {
@@ -849,21 +807,30 @@ function displayDayName(days, dateValue) {
 function buildInitialDays() {
   const storedBookings = sanitizeStoredBookingsByDay(readStoredJson(BOOKINGS_STORAGE_KEY, {}));
 
-  return WEEK_DAYS.map((label, index) => ({
-    id: label.toLowerCase(),
-    label,
-    dateValue: dateValueForOffset(index),
-    settings: {
-      ...cloneValue(DEFAULT_DAY_SETTINGS),
-      dateLabel: label,
-      anchorReleaseEnabled: false,
-      workingStart: index === 6 ? "10:00" : DEFAULT_DAY_SETTINGS.workingStart,
-      workingEnd: index >= 5 ? "16:00" : DEFAULT_DAY_SETTINGS.workingEnd,
-    },
-    bookings: Array.isArray(storedBookings[label.toLowerCase()])
-      ? storedBookings[label.toLowerCase()].map(storageBookingToEngineBooking).filter(Boolean)
-      : index === 0 ? cloneValue(SAMPLE_BOOKINGS) : [],
-  }));
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + index);
+    const dateValue = dateValueFromDate(date);
+    const label = weekdayLabelFromDate(date);
+    const storedDayBookings = storedBookings[dateValue] ?? storedBookings[label.toLowerCase()] ?? [];
+
+    return {
+      id: `${label.toLowerCase()}-${dateValue}`,
+      label,
+      dateValue,
+      settings: {
+        ...cloneValue(DEFAULT_DAY_SETTINGS),
+        dateLabel: label,
+        anchorReleaseEnabled: false,
+        workingStart: label === "Sun" ? "10:00" : DEFAULT_DAY_SETTINGS.workingStart,
+        workingEnd: label === "Sat" || label === "Sun" ? "16:00" : DEFAULT_DAY_SETTINGS.workingEnd,
+      },
+      bookings: Array.isArray(storedDayBookings)
+        ? storedDayBookings.map(storageBookingToEngineBooking).filter(Boolean)
+        : index === 0 ? cloneValue(SAMPLE_BOOKINGS) : [],
+    };
+  });
 }
 
 function buildDaysStarting(startDateValue, existingDays = []) {
@@ -875,9 +842,9 @@ function buildDaysStarting(startDateValue, existingDays = []) {
     const date = new Date(baseDate);
     date.setDate(baseDate.getDate() + index);
     const dateValue = dateValueFromDate(date);
-    const dayLabel = WEEK_DAYS[(date.getDay() + 6) % 7];
+    const dayLabel = weekdayLabelFromDate(date);
     const existingDay = existingDays.find((day) => day.dateValue === dateValue);
-    const storedDayBookings = storedBookings[dayLabel.toLowerCase()] ?? [];
+    const storedDayBookings = storedBookings[dateValue] ?? storedBookings[dayLabel.toLowerCase()] ?? [];
 
     return {
       id: `${dayLabel.toLowerCase()}-${dateValue}`,
@@ -1130,19 +1097,38 @@ function ClientBookingInterface({
   onAcceptOffer,
   onCancelWaitlist,
   onChangeClientWeek,
+  clientSession,
+  clientProfile,
+  clientBookingContext,
+  clientBookingContextLoading,
+  clientAuthLoading,
+  clientAuthError,
+  onGoogleLogin,
+  onClientSignOut,
   isMobilePreviewFrame = false,
   onSwitchAdmin,
 }) {
   const [clientStep, setClientStep] = useState("location");
   const [mobileProgressOpen, setMobileProgressOpen] = useState(false);
   const [selectedAreaId, setSelectedAreaId] = useState("");
-  const [accountModal, setAccountModal] = useState(null);
   const [areaSelectionMessage, setAreaSelectionMessage] = useState("");
   const [checkoutAppointments, setCheckoutAppointments] = useState([]);
   const [checkoutError, setCheckoutError] = useState("");
   const [confirmedAppointments, setConfirmedAppointments] = useState([]);
-  const [paymentMethod, setPaymentMethod] = useState("card");
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [bookingReference, setBookingReference] = useState("");
+  const [paymentHoldExpiresAt, setPaymentHoldExpiresAt] = useState(null);
+  const [alternativeModalOpen, setAlternativeModalOpen] = useState(false);
+  useEffect(() => {
+    if (clientStep === "checkout" && !bookingReference) {
+      const ref = `VB-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0,14)}`;
+      setBookingReference(ref);
+      setPaymentHoldExpiresAt(new Date(Date.now() + 60 * 60 * 1000).toISOString());
+    }
+  }, [clientStep, bookingReference]);
+  const holdMinutesLeft = paymentHoldExpiresAt ? Math.max(0, Math.ceil((new Date(paymentHoldExpiresAt).getTime() - Date.now()) / 60000)) : 0;
   const [selectedEnhancements, setSelectedEnhancements] = useState([]);
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [contactAccepted, setContactAccepted] = useState(false);
   const [activeBookingHold, setActiveBookingHold] = useState(null);
@@ -1174,6 +1160,26 @@ function ClientBookingInterface({
       setSelectedAreaId("");
     }
   }, [selectedAreaId, serviceAreas]);
+
+  useEffect(() => {
+    if (!clientSession?.user) return;
+
+    const fullName = clientProfile?.fullName
+      || clientSession.user.user_metadata?.full_name
+      || clientSession.user.user_metadata?.name
+      || "";
+    const nameParts = fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts.shift() || "";
+    const lastName = nameParts.join(" ");
+
+    setContactDetails((current) => ({
+      ...current,
+      email: current.email || clientProfile?.email || clientSession.user.email || "",
+      firstName: current.firstName || firstName,
+      lastName: current.lastName || lastName,
+      phone: current.phone || clientProfile?.phone || "",
+    }));
+  }, [clientProfile, clientSession]);
 
   useEffect(() => {
     checkoutAppointmentsRef.current = checkoutAppointments;
@@ -1601,7 +1607,58 @@ function ClientBookingInterface({
   }
 
   function updateContactDetail(field, value) {
+    if (field === "address") setSelectedSavedAddressId("");
     setContactDetails((current) => ({ ...current, [field]: value }));
+  }
+
+  function applyReturningClientSelection(selection) {
+    if (!selection?.services?.length) return;
+
+    clearActiveBookingHold();
+    const treatmentDurations = {};
+    const enhancementIds = [];
+
+    selection.services.forEach((item) => {
+      if (services.some((service) => service.id === item.id) && Number(item.durationMinutes) > 0) {
+        treatmentDurations[item.id] = Number(item.durationMinutes);
+      } else if (enhancements.some((enhancement) => enhancement.id === item.id)) {
+        enhancementIds.push(item.id);
+      }
+    });
+
+    const firstServiceId = Object.keys(treatmentDurations)[0] || "";
+    const area = activeServiceAreas.find((item) =>
+      item.id === selection.area
+      || item.name.toLowerCase() === String(selection.area || "").toLowerCase()
+    );
+
+    if (!firstServiceId) {
+      setClientBookingMessage("This previous treatment is no longer available. Please choose another treatment.");
+      setClientStep("treatment");
+      return;
+    }
+    if (!area) {
+      setClientBookingMessage("Please choose an available appointment area before selecting a time.");
+      setClientStep("location");
+      return;
+    }
+
+    setSelectedAreaId(area.id);
+    setClientServiceId(firstServiceId);
+    setServiceDurations(treatmentDurations);
+    setSelectedEnhancements(enhancementIds);
+    setSelectedSavedAddressId(selection.savedAddressId || "");
+    setContactDetails((current) => ({
+      ...current,
+      address: selection.address || current.address,
+      notes: selection.notes || current.notes,
+    }));
+    setClientSelectedSlot(null);
+    setAreaSelectionMessage("");
+    setCheckoutError("");
+    setClientBookingMessage("Your usual session is ready. Choose a date and time.");
+    resetClientConfirmGuard();
+    setClientStep("time");
   }
 
   async function confirmPayment() {
@@ -1611,47 +1668,128 @@ function ClientBookingInterface({
     }
 
     setCheckoutError("");
-    const confirmed = await onConfirmBooking({
-      customer: {
-        email: contactDetails.email.trim(),
-        name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
-        phone: contactDetails.phone.trim(),
-        telegramUpdates: contactDetails.telegramUpdates,
-      },
-      emailPayload: {
-        appointments: checkoutAppointments.map((appointment) => ({
-          date: appointment.dateLabel,
-          durationMinutes: appointment.duration,
-          items: appointment.items,
-          location: appointment.selectedAreaName,
-          manageUrl: `mailto:bookings@vadmassage.com?subject=${encodeURIComponent(`Manage booking ${appointment.dateValue} ${minutesToTime(appointment.start)}`)}`,
-          price: appointment.total,
-          serviceName: appointment.serviceName,
-          time: `${minutesToTime(appointment.start)} - ${minutesToTime(appointment.end)}`,
-        })),
+    let confirmationViewOpened = false;
+
+    try {
+      const confirmed = await onConfirmBooking({
         customer: {
           email: contactDetails.email.trim(),
           name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
           phone: contactDetails.phone.trim(),
           telegramUpdates: contactDetails.telegramUpdates,
         },
-        address: contactDetails.address.trim(),
-        date: checkoutAppointments[0]?.dateLabel ?? "",
-        durationMinutes: checkoutAppointments.reduce((total, appointment) => total + appointment.duration, 0),
-        items: checkoutAppointments.flatMap((appointment) => appointment.items),
-        location: checkoutAppointments.map((appointment) => appointment.selectedAreaName).filter(Boolean).join(", "),
-        time: checkoutAppointments.length === 1 ? `${minutesToTime(checkoutAppointments[0].start)} - ${minutesToTime(checkoutAppointments[0].end)}` : `${checkoutAppointments.length} appointments`,
-        total: checkoutTotal,
-      },
-      appointments: checkoutAppointments,
-    });
-    if (confirmed) {
-      releaseCheckoutHolds(checkoutAppointments);
-      setActiveBookingHold(null);
-      setConfirmedAppointments(checkoutAppointments);
-      setCheckoutAppointments([]);
-      resetCurrentAppointmentDraft();
-      setClientBookingMessage("");
+        emailPayload: {
+          appointments: checkoutAppointments.map((appointment) => ({
+            date: appointment.dateLabel,
+            durationMinutes: appointment.duration,
+            items: appointment.items,
+            location: appointment.selectedAreaName,
+            manageUrl: `mailto:bookings@vadmassage.com?subject=${encodeURIComponent(`Manage booking ${appointment.dateValue} ${minutesToTime(appointment.start)}`)}`,
+            price: appointment.total,
+            serviceName: appointment.serviceName,
+            time: `${minutesToTime(appointment.start)} - ${minutesToTime(appointment.end)}`,
+          })),
+          customer: {
+            email: contactDetails.email.trim(),
+            name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
+            phone: contactDetails.phone.trim(),
+            telegramUpdates: contactDetails.telegramUpdates,
+          },
+          address: contactDetails.address.trim(),
+          notes: contactDetails.notes.trim(),
+          date: checkoutAppointments[0]?.dateLabel ?? "",
+          durationMinutes: checkoutAppointments.reduce((total, appointment) => total + appointment.duration, 0),
+          items: checkoutAppointments.flatMap((appointment) => appointment.items),
+          location: checkoutAppointments.map((appointment) => appointment.selectedAreaName).filter(Boolean).join(", "),
+          time: checkoutAppointments.length === 1 ? `${minutesToTime(checkoutAppointments[0].start)} - ${minutesToTime(checkoutAppointments[0].end)}` : `${checkoutAppointments.length} appointments`,
+          total: checkoutTotal,
+        },
+        appointments: checkoutAppointments,
+        paymentMethod,
+        bookingReference,
+        paymentHoldExpiresAt,
+        savedAddressId: selectedSavedAddressId,
+      });
+
+      if (confirmed) {
+        logBookingConfirmation("redirect attempted");
+        releaseCheckoutHolds(checkoutAppointments);
+        setActiveBookingHold(null);
+        setConfirmedAppointments(checkoutAppointments);
+        setCheckoutAppointments([]);
+        resetCurrentAppointmentDraft();
+        setClientBookingMessage("");
+        confirmationViewOpened = true;
+      }
+    } catch (error) {
+      logBookingConfirmation("confirmation view failed", error);
+      setCheckoutError(error?.message || "Your appointment could not be confirmed. Please try again.");
+    } finally {
+      if (!confirmationViewOpened) {
+        resetClientConfirmGuard();
+      }
+    }
+  }
+
+  async function requestAlternativePayment() {
+    setCheckoutError("");
+    let confirmationViewOpened = false;
+
+    try {
+      const confirmed = await onConfirmBooking({
+        customer: {
+          email: contactDetails.email.trim(),
+          name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
+          phone: contactDetails.phone.trim(),
+          telegramUpdates: contactDetails.telegramUpdates,
+        },
+        emailPayload: {
+          appointments: checkoutAppointments.map((appointment) => ({
+            date: appointment.dateLabel,
+            durationMinutes: appointment.duration,
+            items: appointment.items,
+            location: appointment.selectedAreaName,
+            manageUrl: `mailto:bookings@vadmassage.com?subject=${encodeURIComponent(`Manage booking ${appointment.dateValue} ${minutesToTime(appointment.start)}`)}`,
+            price: appointment.total,
+            serviceName: appointment.serviceName,
+            time: `${minutesToTime(appointment.start)} - ${minutesToTime(appointment.end)}`,
+          })),
+          customer: {
+            email: contactDetails.email.trim(),
+            name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
+            phone: contactDetails.phone.trim(),
+            telegramUpdates: contactDetails.telegramUpdates,
+          },
+          address: contactDetails.address.trim(),
+          notes: contactDetails.notes.trim(),
+          date: checkoutAppointments[0]?.dateLabel ?? "",
+          durationMinutes: checkoutAppointments.reduce((total, appointment) => total + appointment.duration, 0),
+          items: checkoutAppointments.flatMap((appointment) => appointment.items),
+          location: checkoutAppointments.map((appointment) => appointment.selectedAreaName).filter(Boolean).join(", "),
+          time: checkoutAppointments.length === 1 ? `${minutesToTime(checkoutAppointments[0].start)} - ${minutesToTime(checkoutAppointments[0].end)}` : `${checkoutAppointments.length} appointments`,
+          total: checkoutTotal,
+        },
+        appointments: checkoutAppointments,
+        paymentMethod: "alternative_requested",
+        savedAddressId: selectedSavedAddressId,
+      });
+
+      if (confirmed) {
+        setAlternativeModalOpen(false);
+        releaseCheckoutHolds(checkoutAppointments);
+        setActiveBookingHold(null);
+        setConfirmedAppointments(checkoutAppointments);
+        setCheckoutAppointments([]);
+        resetCurrentAppointmentDraft();
+        setClientBookingMessage("");
+        confirmationViewOpened = true;
+      }
+    } catch (error) {
+      setCheckoutError(error?.message || "Your request could not be submitted. Please try again.");
+    } finally {
+      if (!confirmationViewOpened) {
+        resetClientConfirmGuard();
+      }
     }
   }
 
@@ -1724,6 +1862,17 @@ function ClientBookingInterface({
             <p className="boutique-kicker">Private mobile massage by appointment</p>
             <h1>Reserve <span>your private treatment</span></h1>
             <p className="area-picker-subtitle">Choose the area for your one-to-one mobile massage session.</p>
+            {clientSession?.user && (
+              <BookAgainPanel
+                clientName={clientProfile?.fullName || ""}
+                favoriteSelection={clientBookingContext?.favoriteSelection || null}
+                lastSelection={clientBookingContext?.lastSelection || null}
+                loading={clientBookingContextLoading}
+                onApply={applyReturningClientSelection}
+                recentSelections={clientBookingContext?.recentBookingCombinations || []}
+                usualSelection={clientBookingContext?.usualSelection || null}
+              />
+            )}
             <div className="client-area-picker" ref={areaPickerRef}>
               {activeServiceAreas.length > 0 ? (
                 activeServiceAreas.map((area) => (
@@ -1754,8 +1903,14 @@ function ClientBookingInterface({
               </button>
             </div>
             <div className="account-actions">
-              <button type="button" className="outline-action" onClick={() => setAccountModal("login")}><span aria-hidden="true" className="action-person-icon" />Login</button>
-              <button type="button" className="outline-action" onClick={() => setAccountModal("create")}><span aria-hidden="true" className="action-plus-icon" />Create account</button>
+              <ClientAccountPanel
+                error={clientAuthError}
+                loading={clientAuthLoading}
+                onGoogleLogin={onGoogleLogin}
+                onSignOut={onClientSignOut}
+                profile={clientProfile}
+                session={clientSession}
+              />
             </div>
           </div>
           <section className="therapist-profile-section" aria-label="Your therapist">
@@ -2051,19 +2206,6 @@ function ClientBookingInterface({
               <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />
               <span>I read terms and conditions.</span>
             </label>
-            <label className="consent-row telegram-consent-row">
-              <input
-                type="checkbox"
-                checked={contactDetails.telegramUpdates}
-                onChange={(event) => updateContactDetail("telegramUpdates", event.target.checked)}
-              />
-              <span>Receive booking updates on Telegram</span>
-            </label>
-            {contactDetails.telegramUpdates && (
-              <p className="telegram-helper-note">
-                Open <a href="https://t.me/vadim_massage_bot" target="_blank" rel="noreferrer">@vadim_massage_bot</a> and press Start so I can send booking updates there.
-              </p>
-            )}
             <label className="consent-row">
               <input type="checkbox" checked={contactAccepted} onChange={(event) => setContactAccepted(event.target.checked)} />
               <span>I confirm these details are correct.</span>
@@ -2138,36 +2280,51 @@ function ClientBookingInterface({
                   <span>Total</span>
                   <strong>{"\u00a3"}{checkoutTotal.toFixed(2)}</strong>
                 </div>
-                <div className="payment-tabs">
-                  <button
-                    type="button"
-                    className={paymentMethod === "card" ? "active-payment-tab" : ""}
-                    onClick={() => setPaymentMethod("card")}
-                  >
-                    Card
-                  </button>
-                  <button
-                    type="button"
-                    className={paymentMethod === "pay-later" ? "active-payment-tab" : ""}
-                    onClick={() => setPaymentMethod("pay-later")}
-                  >
-                    Pay later
-                  </button>
-                </div>
-                {paymentMethod === "card" ? (
-                  <div className="payment-form">
-                    <label className="wide-field">Card number<input type="text" placeholder="1234 1234 1234 1234" /></label>
-                    <label>Expiry<input type="text" placeholder="MM / YY" /></label>
-                    <label>CVC<input type="text" placeholder="123" /></label>
-                    <label className="wide-field">Name on card<input type="text" placeholder="Name" /></label>
+                <div className="reservation-panel">
+                  <div className="reservation-row">
+                    <span>Reference</span>
+                    <div>
+                      <small>Booking reference</small>
+                      <strong>{bookingReference || "Generating..."}</strong>
+                    </div>
+                    <div>
+                      <button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText(bookingReference || ""); }}>Copy</button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="payment-note">I will confirm your appointment request first and send payment details separately.</p>
-                )}
-                {checkoutError && <p className="booking-validation-message">{checkoutError}</p>}
-                <button type="button" className="pay-button" disabled={checkoutAppointments.length === 0 || clientIsConfirming} onClick={confirmPayment}>
-                  {clientIsConfirming ? "Confirming..." : paymentMethod === "card" ? `Confirm and pay \u00a3${checkoutTotal.toFixed(2)}` : "Confirm booking request"}
-                </button>
+                  <div className="reservation-row">
+                    <span>Amount</span>
+                    <div>
+                      <small>Amount due</small>
+                      <strong>{"\u00a3"}{checkoutTotal.toFixed(2)}</strong>
+                    </div>
+                  </div>
+                  <div className="reservation-row">
+                    <span>Wise</span>
+                    <div>
+                      <small>Wise payment link</small>
+                      <strong><em>Payment link placeholder</em></strong>
+                      <div><button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText("https://wise.example/payment"); }}>Copy link</button></div>
+                    </div>
+                  </div>
+                  <div className="reservation-row">
+                    <span>Bank</span>
+                    <div>
+                      <small>Bank details</small>
+                      <strong>Account: 12345678 | Sort: 12-34-56 | Name: VAD Massage</strong>
+                      <div><button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText("Account: 12345678 Sort: 12-34-56 Name: VAD Massage"); }}>Copy</button></div>
+                    </div>
+                  </div>
+                  <p className="booking-note">Your selected appointment time is reserved for 60 minutes while payment is completed.</p>
+                  <p className="booking-note">Your booking will be confirmed once payment has been received and verified.</p>
+                  <div className="reservation-expiry">Reservation expires in <strong>{holdMinutesLeft} minutes</strong></div>
+                  {checkoutError && <p className="booking-validation-message">{checkoutError}</p>}
+                  <div className="reservation-actions">
+                    <button type="button" className="pay-button" disabled={checkoutAppointments.length === 0 || clientIsConfirming} onClick={confirmPayment}>
+                      {clientIsConfirming ? "Confirming..." : "I've completed the bank transfer"}
+                    </button>
+                    <button type="button" className="alternative-link" onClick={() => setAlternativeModalOpen(true)}>Can't pay by bank transfer?</button>
+                  </div>
+                </div>
               </>
             )}
             <div className="booking-footer-actions">
@@ -2181,24 +2338,6 @@ function ClientBookingInterface({
         </section>
       )}
 
-      {accountModal && (
-        <div className="booking-modal-backdrop" role="presentation">
-          <div className="booking-modal" role="dialog" aria-modal="true">
-            <h2>{accountModal === "login" ? "Login" : "Create an account"}</h2>
-            <input type="email" placeholder="Email address" />
-            <input type="password" placeholder="Password" />
-            {accountModal === "create" && <input type="password" placeholder="Confirm password" />}
-            <button type="button" onClick={() => setAccountModal(null)}>
-              {accountModal === "login" ? "Login" : "Create account"}
-            </button>
-            <button type="button" className="secondary-button" onClick={() => setAccountModal(accountModal === "login" ? "create" : "login")}>
-              {accountModal === "login" ? "Create a new account" : "I already have an account"}
-            </button>
-            <button type="button" className="modal-close" onClick={() => setAccountModal(null)}>Close</button>
-          </div>
-        </div>
-      )}
-
       {fullDescriptionService && (
         <div className="booking-modal-backdrop" role="presentation">
           <div className="booking-modal service-description-modal" role="dialog" aria-modal="true">
@@ -2207,6 +2346,19 @@ function ClientBookingInterface({
             <p>{fullDescriptionService.longDescription}</p>
             <button type="button" onClick={() => selectDescriptionService(fullDescriptionService.id)}>Select service</button>
             <button type="button" className="modal-close" onClick={() => setFullDescriptionServiceId(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {alternativeModalOpen && (
+        <div className="booking-modal-backdrop" role="presentation">
+          <div className="booking-modal alternative-payment-modal" role="dialog" aria-modal="true">
+            <h2>Need another payment option?</h2>
+            <p>If bank transfer isn't convenient, you can request an alternative payment arrangement for this booking. Requests are reviewed individually.</p>
+            <div className="modal-actions">
+              <button type="button" onClick={async () => { await requestAlternativePayment(); }}>Request alternative payment method</button>
+              <button type="button" className="modal-close" onClick={() => setAlternativeModalOpen(false)}>Close</button>
+            </div>
           </div>
         </div>
       )}
@@ -2815,8 +2967,9 @@ function AdminWorkspace({
     }
 
     try {
-      const updatedBooking = await onUpdateBooking(overviewBooking.id, nextPatch);
-      setOverviewBooking((current) => current ? { ...current, ...(updatedBooking ?? nextPatch) } : current);
+      const normalizedPatch = normalizeAdminBookingApprovalPatch(nextPatch, overviewBooking);
+      const updatedBooking = await onUpdateBooking(overviewBooking.id, normalizedPatch);
+      setOverviewBooking((current) => current ? { ...current, ...(updatedBooking ?? normalizedPatch) } : current);
     } catch (error) {
       window.alert(error.message);
     }
@@ -3900,6 +4053,33 @@ function AdminWorkspace({
                   )}
                 </div>
                 <div><span>Contact</span><strong>{overviewBooking.customerPhone || overviewBooking.customerEmail || "Not captured"}</strong></div>
+                <div>
+                  <span>Payment method</span>
+                  {overviewEditing ? (
+                    <input value={overviewBooking.paymentMethod || ""} onChange={(event) => updateOverviewBooking({ paymentMethod: event.target.value })} />
+                  ) : (
+                    <strong>{overviewBooking.paymentMethod || "bank_transfer"}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Payment status</span>
+                  {overviewEditing ? (
+                    <input value={overviewBooking.paymentStatus || ""} onChange={(event) => updateOverviewBooking({ paymentStatus: event.target.value })} />
+                  ) : (
+                    <strong>{overviewBooking.paymentStatus || "awaiting_verification"}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Reference</span>
+                  <strong>{overviewBooking.bookingReference || "-"}</strong>
+                </div>
+                <div>
+                  <span>Reservation expiry</span>
+                  <strong>{overviewBooking.paymentHoldExpiresAt ? (new Date(overviewBooking.paymentHoldExpiresAt)).toLocaleString() : "-"}</strong>
+                </div>
+                <div>
+                  <button type="button" onClick={() => updateOverviewBooking({ paymentStatus: "paid", status: "confirmed" })}>Mark Payment Received</button>
+                </div>
                 <div className="overview-wide">
                   <span>Services</span>
                   {itemsForBooking(overviewBooking).map((item, index) => (
@@ -3961,6 +4141,11 @@ function App() {
   const [showInvalidSlots, setShowInvalidSlots] = useState(false);
   const [activeView, setActiveView] = useState(initialView);
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
+  const [authSession, setAuthSession] = useState(null);
+  const [clientProfile, setClientProfile] = useState(null);
+  const [clientBookingContext, setClientBookingContext] = useState(null);
+  const [clientBookingContextLoading, setClientBookingContextLoading] = useState(false);
+  const [clientAuthError, setClientAuthError] = useState("");
   const [adminSession, setAdminSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [adminAuthError, setAdminAuthError] = useState("");
@@ -4014,12 +4199,66 @@ function App() {
     let cancelled = false;
     let subscription;
 
+    async function applySession(session) {
+      if (cancelled) return;
+      setAuthSession(session);
+      setClientAuthError("");
+
+      if (!session?.user) {
+        setClientProfile(null);
+        setClientBookingContext(null);
+        setClientBookingContextLoading(false);
+        setAdminSession(null);
+        return;
+      }
+
+      let isAdmin = false;
+      try {
+        const { isCurrentUserBookingAdmin } = await import("./supabaseClient.js");
+        isAdmin = await isCurrentUserBookingAdmin();
+        if (!cancelled) setAdminSession(isAdmin ? session : null);
+      } catch (error) {
+        if (!cancelled) {
+          setAdminSession(null);
+          console.warn("Could not verify admin access.", error);
+        }
+      }
+
+      if (isAdmin) {
+        if (!cancelled) {
+          setClientProfile(null);
+          setClientBookingContext(null);
+          setClientBookingContextLoading(false);
+        }
+        return;
+      }
+
+      if (!cancelled) setClientBookingContextLoading(true);
+      try {
+        const existingProfile = await getCurrentClientProfile().catch(() => null);
+        const profileInput = profileInputFromAuthUser(session.user, existingProfile);
+        const profile = await upsertCurrentClientProfile(profileInput);
+        const bookingContext = await loadCurrentClientBookingContext();
+        if (!cancelled) {
+          setClientProfile(profile);
+          setClientBookingContext(bookingContext);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setClientBookingContext(null);
+          setClientAuthError("Signed in, but your returning-client shortcuts could not be loaded yet.");
+          console.warn("Client profile or booking context sync failed.", error);
+        }
+      } finally {
+        if (!cancelled) setClientBookingContextLoading(false);
+      }
+    }
+
     import("./supabaseClient.js")
       .then(({ getCurrentSession, supabase }) => {
         if (cancelled) return null;
-
         const authListener = supabase.auth.onAuthStateChange((event, session) => {
-          setAdminSession(session);
+          applySession(session);
           setAdminAuthError("");
           if (event === "PASSWORD_RECOVERY") {
             setPasswordRecovery(true);
@@ -4027,21 +4266,21 @@ function App() {
           }
         });
         subscription = authListener.data.subscription;
-
         return getCurrentSession();
       })
-      .then((session) => {
-        if (cancelled || session === null) return;
-        setAdminSession(session);
-      })
+      .then((session) => applySession(session))
       .catch((error) => {
         if (!cancelled) {
+          setClientAuthError(error.message || "Could not check your session.");
           setAdminAuthError(error.message || "Could not check admin session.");
         }
       })
       .finally(() => {
         if (!cancelled) setAuthLoading(false);
       });
+
+    const authError = new URLSearchParams(window.location.search).get("error_description");
+    if (authError) setClientAuthError(authError);
 
     return () => {
       cancelled = true;
@@ -4186,12 +4425,96 @@ function App() {
     setServiceAreas((current) => sanitizeServiceAreas(current.filter((item) => item.id !== areaId)));
   }
 
+  async function handleClientGoogleLogin() {
+    setClientAuthError("");
+    try {
+      const { signInClientWithGoogle } = await import("./supabaseClient.js");
+      const redirectTo = `${window.location.origin}${window.location.pathname}?view=client`;
+      await signInClientWithGoogle(redirectTo);
+    } catch (error) {
+      const message = error.message || "Google login could not be started.";
+      setClientAuthError(message);
+      throw new Error(message);
+    }
+  }
+
+  async function handleClientSignOut() {
+    setClientAuthError("");
+    try {
+      const { signOutCurrentUser } = await import("./supabaseClient.js");
+      await signOutCurrentUser();
+      setAuthSession(null);
+      setClientProfile(null);
+      setClientBookingContext(null);
+      setClientBookingContextLoading(false);
+      setAdminSession(null);
+      setActiveView("client");
+    } catch (error) {
+      const message = error.message || "Could not sign out.";
+      setClientAuthError(message);
+      throw new Error(message);
+    }
+  }
+
+  async function syncClientProfileFromBookingCustomer(customer) {
+    if (!authSession?.user) return;
+    try {
+      const existingProfile = await getCurrentClientProfile().catch(() => clientProfile);
+      const profileInput = profileInputFromAuthUser(authSession.user, existingProfile, customer?.phone || "");
+      const profile = await upsertCurrentClientProfile({
+        ...profileInput,
+        fullName: customer?.name?.trim() || profileInput.fullName,
+      });
+      setClientProfile(profile);
+    } catch (error) {
+      console.warn("Booking succeeded, but the client profile could not be updated.", error);
+    }
+  }
+
+  async function syncReturningClientBookingDefaults({
+    appointments = [],
+    bookingIds = [],
+    emailPayload = {},
+    savedAddressId = "",
+  }) {
+    if (!authSession?.user || appointments.length === 0) return;
+
+    try {
+      const area = appointments[0]?.selectedAreaName || emailPayload.location || "";
+      const savedAddress = savedAddressId
+        ? { id: savedAddressId }
+        : await ensureCurrentClientBookingAddress({
+            addressLine1: emailPayload.address || "",
+            area,
+            instructions: emailPayload.notes || "",
+          });
+      await updateCurrentClientBookingDefaults({
+        address: emailPayload.address || "",
+        area,
+        bookingIds,
+        notes: emailPayload.notes || "",
+        savedAddressId: savedAddress?.id || savedAddressId,
+        services: appointments[0]?.items || [],
+      });
+      const context = await loadCurrentClientBookingContext();
+      setClientBookingContext(context);
+    } catch (error) {
+      console.warn("Booking succeeded, but returning-client preferences could not be updated.", error);
+    }
+  }
+
   async function handleAdminLogin(email, password) {
     setAdminAuthError("");
 
     try {
-      const { signInAdmin } = await import("./supabaseClient.js");
+      const { isCurrentUserBookingAdmin, signInAdmin, signOutCurrentUser } = await import("./supabaseClient.js");
       const session = await signInAdmin(email, password);
+      const isAdmin = await isCurrentUserBookingAdmin();
+      if (!isAdmin) {
+        await signOutCurrentUser();
+        throw new Error("This account does not have admin access.");
+      }
+      setAuthSession(session);
       setAdminSession(session);
     } catch (error) {
       const message = error.message || "Admin login failed.";
@@ -4279,7 +4602,7 @@ function App() {
     }
   }
 
-  async function addBookingToDay(dayIndex, { address = "", clientName = "", congestionFee = 0, customerEmail = "", customerPhone = "", items = [], kind = "booking", location = "", orderId = "", paymentId = "", price = 0, serviceId, serviceName: providedServiceName = "", start, duration, telegramUpdates = false, travelBuffer, travelFee = 0 }) {
+  async function addBookingToDay(dayIndex, { address = "", clientName = "", congestionFee = 0, customerEmail = "", customerPhone = "", items = [], kind = "booking", location = "", orderId = "", paymentId = "", price = 0, savedAddressId = "", serviceId, serviceName: providedServiceName = "", start, duration, telegramUpdates = false, travelBuffer, travelFee = 0, userId = "", paymentMethod = "", paymentStatus = "", bookingReference = "", paymentHoldExpiresAt = null, status = "confirmed" }) {
     const serviceName = providedServiceName || serviceNameFor(services, serviceId);
     const linkedRequestId = buildLinkedRequestId({
       serviceId,
@@ -4313,9 +4636,11 @@ function App() {
       orderId,
       paymentId,
       price,
+      savedAddressId,
       start: minutesToTime(start),
       telegramUpdates,
       travelFee,
+      userId,
     };
     const dayKey = days[dayIndex]?.dateValue ?? days[dayIndex]?.id ?? "";
     const bookingSignature = bookingDuplicateSignature(booking, dayKey);
@@ -4331,7 +4656,7 @@ function App() {
     pendingBookingSignatures.add(bookingSignature);
     let savedBooking;
     try {
-      const insertedRow = await saveBookingToSupabase(booking);
+      const insertedRow = await saveBookingToSupabase(booking, status);
       savedBooking = { ...booking, id: String(insertedRow?.id ?? booking.id) };
     } finally {
       pendingBookingSignatures.delete(bookingSignature);
@@ -4361,6 +4686,12 @@ function App() {
           : entry
       )
     );
+
+    if (kind === "booking") {
+      notifyAdminTelegram("booking_created", { booking: savedBooking, paymentStatus: paymentStatus || "awaiting_verification" });
+    }
+
+    return savedBooking;
   }
 
   async function createAdminAppointment(appointment) {
@@ -4398,41 +4729,49 @@ function App() {
       });
   }
 
-  async function confirmClientBooking({ appointments = [], customer, dayIndex, emailPayload, hold, serviceId, slot }) {
+  async function confirmClientBooking({ appointments = [], customer, dayIndex, emailPayload, hold, paymentMethod = "card", savedAddressId = "", serviceId, slot, bookingReference = "", paymentHoldExpiresAt = null }) {
     if (clientConfirmingRef.current) return false;
 
     clientConfirmingRef.current = true;
     setClientIsConfirming(true);
     setClientBookingMessage("");
+    logBookingConfirmation("confirm started");
 
-    if (appointments.length > 0) {
-      const basketValidation = validateBasketAppointments({ appointments, days, serviceAreas });
-
-      if (!basketValidation.ok) {
-        setClientBookingMessage(`${basketValidation.message} Please edit that appointment only.`);
-        setClientIsConfirming(false);
-        clientConfirmingRef.current = false;
-        return false;
-      }
-
+    try {
+      // Always create an order for client-originated bookings so payment metadata is tracked.
       const orderId = crypto.randomUUID ? crypto.randomUUID() : `order-${Date.now()}`;
       const paymentId = `pay_${orderId}`;
-      const totalAmount = appointments.reduce((total, appointment) => total + appointment.total, 0);
+      const totalAmount = appointments.length > 0
+        ? appointments.reduce((total, appointment) => total + appointment.total, 0)
+        : Number(emailPayload?.total) || 0;
+      const paymentStatus = paymentMethodToPaymentStatus(paymentMethod);
+      await createOrderInSupabase({
+        clientEmail: customer?.email ?? "",
+        clientName: customer?.name ?? "",
+        id: orderId,
+        userId: authSession?.user?.id || "",
+        paymentId,
+        paymentProvider: "manual-demo",
+        paymentStatus,
+        totalAmount,
+      });
 
-      try {
-        await createOrderInSupabase({
-          clientEmail: customer?.email ?? "",
-          clientName: customer?.name ?? "",
-          id: orderId,
-          paymentId,
-          paymentProvider: "manual-demo",
-          paymentStatus: "paid",
-          totalAmount,
-        });
+      if (appointments.length > 0) {
+        logBookingConfirmation("slot revalidation started");
+        const basketValidation = validateBasketAppointments({ appointments, days, serviceAreas });
+        if (!basketValidation.ok) {
+          logBookingConfirmation("slot revalidation failed");
+          throw new Error(`${basketValidation.message} Please edit that appointment only.`);
+        }
+        logBookingConfirmation("slot revalidation succeeded");
 
+        const savedBookings = [];
         for (const appointment of appointments) {
           const appointmentDayIndex = days.findIndex((day) => day.dateValue === appointment.dateValue);
-          await addBookingToDay(appointmentDayIndex, {
+          if (appointmentDayIndex < 0) {
+            throw new Error("An appointment date is no longer available. Please edit that appointment.");
+          }
+          const savedAppointment = await addBookingToDay(appointmentDayIndex, {
             address: emailPayload?.address ?? "",
             clientName: customer?.name ?? "",
             congestionFee: appointment.congestionFee,
@@ -4443,31 +4782,61 @@ function App() {
             location: appointment.selectedAreaName,
             orderId,
             paymentId,
+            paymentMethod,
+            paymentStatus,
+            bookingReference: bookingReference || undefined,
+            paymentHoldExpiresAt,
+            status: paymentMethodToBookingStatus(paymentMethod),
             price: appointment.price,
+            savedAddressId,
             serviceId: appointment.serviceId,
             serviceName: appointment.serviceName,
             start: appointment.start,
             telegramUpdates: Boolean(customer?.telegramUpdates),
             travelBuffer: appointment.travelBuffer,
             travelFee: appointment.travelFee,
+            userId: authSession?.user?.id || "",
           });
+          if (!savedAppointment) {
+            throw new Error("An appointment could not be added because it is already in the calendar.");
+          }
+          savedBookings.push(savedAppointment);
+          logBookingConfirmation("notification started");
+          notifyAdminTelegram("payment_status", {
+            amount: appointment.total,
+            booking: savedAppointment,
+            paymentMethod,
+            status: paymentStatus,
+          });
+          logBookingConfirmation("notification backgrounded");
         }
-      } catch (error) {
-        console.error(error);
-        setClientBookingMessage(error.message);
-        setClientIsConfirming(false);
-        clientConfirmingRef.current = false;
-        return false;
-      }
 
-      appointments.forEach((appointment) => {
-        if (appointment.hold) releaseBookingHoldInSupabase(appointment.hold);
-      });
-      setClientSelectedSlot(null);
-      setClientBookingMessage("Your appointments are confirmed.");
+        void Promise.all([
+          syncClientProfileFromBookingCustomer(customer),
+          syncReturningClientBookingDefaults({
+            appointments,
+            bookingIds: savedBookings.map((booking) => booking.id),
+            emailPayload,
+            savedAddressId,
+          }),
+        ]).catch(() => {
+          logBookingConfirmation("client preference sync failed");
+        });
 
-      try {
-        await postTransactionalEmail({
+        appointments.forEach((appointment) => {
+          if (appointment.hold) void releaseBookingHoldInSupabase(appointment.hold);
+        });
+        setClientSelectedSlot(null);
+        if (paymentMethod === "bank_transfer") {
+          setClientBookingMessage("Your appointments are reserved. Your booking is awaiting payment verification.");
+        } else if (paymentMethod === "alternative_requested") {
+          setClientBookingMessage("Your alternative payment request has been submitted and will be reviewed.");
+        } else {
+          setClientBookingMessage("Your appointments are confirmed.");
+        }
+
+        logBookingConfirmation("notification started");
+        const emailTask = postTransactionalEmail({
           payload: {
             ...emailPayload,
             orderId,
@@ -4476,78 +4845,109 @@ function App() {
           to: customer?.email,
           type: "bookingConfirmation",
         });
-      } catch {
-        setClientBookingMessage("Your appointments are confirmed. Confirmation email could not be queued.");
+        logBookingConfirmation("notification backgrounded");
+        void emailTask.catch(() => {
+          logBookingConfirmation("notification failed");
+          setClientBookingMessage("Your appointments are confirmed. Confirmation email could not be queued.");
+        });
+        return true;
       }
 
-      setClientIsConfirming(false);
-      clientConfirmingRef.current = false;
-      return true;
-    }
+      logBookingConfirmation("slot revalidation started");
+      const day = days[dayIndex];
+      if (!day || !slot) {
+        logBookingConfirmation("slot revalidation failed");
+        throw new Error("The selected appointment time is missing. Please choose it again.");
+      }
+      const latestPreview = getSchedulingPreview({
+        settings: day.settings,
+        bookings: day.bookings,
+        requestedDuration: clientDuration,
+        requestedTravelBuffer: DEFAULT_TRAVEL_BUFFER,
+      });
+      const stillAvailable = latestPreview.slots.some((availableSlot) => {
+        return (
+          availableSlot.start === slot.start &&
+          availableSlot.end === slot.end &&
+          availableSlot.bufferEnd === slot.bufferEnd
+        );
+      });
+      if (!stillAvailable) {
+        logBookingConfirmation("slot revalidation failed");
+        setClientSelectedSlot(null);
+        throw new Error("This time is no longer available. Please choose another.");
+      }
+      logBookingConfirmation("slot revalidation succeeded");
 
-    const day = days[dayIndex];
-    const latestPreview = getSchedulingPreview({
-      settings: day.settings,
-      bookings: day.bookings,
-      requestedDuration: clientDuration,
-      requestedTravelBuffer: DEFAULT_TRAVEL_BUFFER,
-    });
-    const stillAvailable = latestPreview.slots.some((availableSlot) => {
-      return (
-        availableSlot.start === slot.start &&
-        availableSlot.end === slot.end &&
-        availableSlot.bufferEnd === slot.bufferEnd
-      );
-    });
-
-    if (!stillAvailable) {
-      setClientSelectedSlot(null);
-      setClientBookingMessage("This time is no longer available. Please choose another.");
-      setClientIsConfirming(false);
-      clientConfirmingRef.current = false;
-      return false;
-    }
-
-    try {
-      await addBookingToDay(dayIndex, {
+      const savedBooking = await addBookingToDay(dayIndex, {
         address: emailPayload?.address ?? "",
         clientName: customer?.name ?? "",
         customerEmail: customer?.email ?? "",
         customerPhone: customer?.phone ?? "",
         items: emailPayload?.items ?? [],
         location: emailPayload?.location ?? "",
+        savedAddressId,
         serviceId,
         start: slot.start,
         duration: clientDuration,
         telegramUpdates: Boolean(customer?.telegramUpdates),
         travelBuffer: DEFAULT_TRAVEL_BUFFER,
+        userId: authSession?.user?.id || "",
+        orderId,
+        paymentId,
+        paymentMethod,
+        paymentStatus,
+        bookingReference: bookingReference || undefined,
+        paymentHoldExpiresAt,
+        status: paymentMethodToBookingStatus(paymentMethod),
       });
-    } catch (error) {
-      console.error(error);
-      setClientBookingMessage(error.message);
-      setClientIsConfirming(false);
-      clientConfirmingRef.current = false;
-      return false;
-    }
 
-    await releaseBookingHoldInSupabase(hold);
-    setClientSelectedSlot(null);
-    setClientBookingMessage("Booking confirmed.");
+      void Promise.all([
+        syncClientProfileFromBookingCustomer(customer),
+        syncReturningClientBookingDefaults({
+          appointments: [{
+            items: emailPayload?.items ?? [],
+            selectedAreaName: emailPayload?.location ?? "",
+          }],
+          bookingIds: savedBooking.id ? [savedBooking.id] : [],
+          emailPayload,
+          savedAddressId,
+        }),
+      ]).catch(() => {
+        logBookingConfirmation("client preference sync failed");
+      });
 
-    try {
-      await postTransactionalEmail({
+      void releaseBookingHoldInSupabase(hold);
+      setClientSelectedSlot(null);
+      if (paymentMethod === "bank_transfer") {
+        setClientBookingMessage("Booking reserved. Your booking is awaiting payment verification.");
+      } else if (paymentMethod === "alternative_requested") {
+        setClientBookingMessage("Your alternative payment request has been submitted and will be reviewed.");
+      } else {
+        setClientBookingMessage("Booking confirmed.");
+      }
+      setSelectedDayIndex(dayIndex);
+
+      logBookingConfirmation("notification started");
+      const emailTask = postTransactionalEmail({
         payload: emailPayload,
         to: customer?.email,
         type: "bookingConfirmation",
       });
-    } catch {
-      setClientBookingMessage("Booking confirmed. Confirmation email could not be queued.");
+      logBookingConfirmation("notification backgrounded");
+      void emailTask.catch(() => {
+        logBookingConfirmation("notification failed");
+        setClientBookingMessage("Booking confirmed. Confirmation email could not be queued.");
+      });
+      return true;
+    } catch (error) {
+      logBookingConfirmation("confirm failed", error);
+      setClientBookingMessage(error?.message || "Your appointment could not be confirmed. Please try again.");
+      return false;
+    } finally {
+      setClientIsConfirming(false);
+      clientConfirmingRef.current = false;
     }
-
-    setClientIsConfirming(false);
-    clientConfirmingRef.current = false;
-    setSelectedDayIndex(dayIndex);
-    return true;
   }
 
   function joinWaitlist(event) {
@@ -4585,6 +4985,12 @@ function App() {
     }
 
     setWaitlistEntries((current) => [...current, entry]);
+    notifyAdminTelegram("waitlist_request", {
+      ...entry,
+      area: selectedArea?.name || "",
+      email: contactDetails.email,
+      phone: contactDetails.phone,
+    });
     setWaitlistForm((current) => ({
       ...current,
       clientName: "",
@@ -4656,6 +5062,7 @@ function App() {
         start: entry.offeredSlot.start,
         duration: entry.duration,
         travelBuffer: DEFAULT_TRAVEL_BUFFER,
+        userId: authSession?.user?.id || "",
       });
     } catch (error) {
       console.error(error);
@@ -4685,9 +5092,14 @@ function App() {
   }
 
   async function removeBooking(id) {
+    const bookingToDelete = bookings.find((item) => item.id === id);
+
     try {
       await deleteBookingFromSupabase(id);
       setSelectedDayBookings((current) => current.filter((booking) => booking.id !== id));
+      if (bookingToDelete) {
+        notifyAdminTelegram("booking_cancelled", { booking: { ...bookingToDelete, dateValue: selectedDay.dateValue }, cancellationStatus: "deleted by admin" });
+      }
     } catch (error) {
       window.alert(error.message);
     }
@@ -4695,10 +5107,12 @@ function App() {
 
   async function updateBookingAcrossDays(id, patch) {
     let nextBooking = null;
+    let oldBooking = null;
 
     for (const day of days) {
       const booking = day.bookings.find((item) => item.id === id);
       if (booking) {
+        oldBooking = { ...booking, dateValue: day.dateValue };
         nextBooking = { ...booking, ...patch, dateValue: day.dateValue };
         break;
       }
@@ -4706,8 +5120,12 @@ function App() {
 
     if (!nextBooking) return null;
 
+    const normalizedPatch = normalizeAdminBookingApprovalPatch(patch, nextBooking);
+    nextBooking = { ...nextBooking, ...normalizedPatch };
+
     try {
       await updateBookingInSupabase(nextBooking);
+      notifyAdminTelegram("booking_modified", { bookingId: id, newBooking: nextBooking, oldBooking });
       setDays((current) =>
         current.map((day) => ({
           ...day,
@@ -4759,7 +5177,9 @@ function App() {
     if (!confirmed) return;
 
     try {
+      const deletedBooking = days.flatMap((day) => day.bookings).find((booking) => booking.id === id);
       await deleteBookingFromSupabase(id);
+      if (deletedBooking) notifyAdminTelegram("booking_cancelled", { booking: deletedBooking, cancellationStatus: "deleted by admin" });
       setDays((current) =>
         current.map((day) => ({
           ...day,
@@ -4869,6 +5289,14 @@ function App() {
           onAcceptOffer={acceptWaitlistOffer}
           onCancelWaitlist={cancelWaitlistRequest}
           onChangeClientWeek={changeClientVisibleWeek}
+          clientSession={authSession}
+          clientProfile={clientProfile}
+          clientBookingContext={clientBookingContext}
+          clientBookingContextLoading={clientBookingContextLoading}
+          clientAuthLoading={authLoading}
+          clientAuthError={clientAuthError}
+          onGoogleLogin={handleClientGoogleLogin}
+          onClientSignOut={handleClientSignOut}
           isMobilePreviewFrame={isMobilePreviewFrame}
           onSwitchAdmin={() => setActiveView("admin")}
         />
@@ -5324,3 +5752,11 @@ function App() {
 }
 
 export default App;
+export {
+  bookingToSupabasePayload,
+  bookingToLegacySupabasePayload,
+  normalizeStoredBooking,
+};
+
+
+
