@@ -600,8 +600,8 @@ begin
   if requested_start is null or requested_start < 0 or requested_start >= 1440 then
     raise exception 'Booking start time is invalid.';
   end if;
-  if requested_duration is null or requested_duration <= 0 then
-    raise exception 'Booking duration must be greater than zero.';
+  if requested_duration is null or requested_duration <= 0 or not (requested_duration = any(ARRAY[60, 90, 120, 150, 180, 210, 240])) then
+    raise exception 'Booking duration must be one of: 60, 90, 120, 150, 180, 210, 240 minutes.';
   end if;
   if requested_end <= requested_start or requested_end > 2880 then
     raise exception 'Booking end time is invalid.';

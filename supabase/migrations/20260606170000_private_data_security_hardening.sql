@@ -792,6 +792,7 @@ declare
     'congestion_fee',
     'payment_id',
     'status',
+    'payment_status',
     'notes',
     'selected_services',
     'selected_durations'
@@ -810,6 +811,7 @@ declare
   normalized_phone text;
   normalized_service text;
   normalized_status text;
+  normalized_payment_status text;
   normalized_services jsonb;
   normalized_durations jsonb;
   normalized_price numeric(10,2);
@@ -901,6 +903,79 @@ begin
     else 'confirmed'
   end;
 
+  normalized_payment_status := case
+    when is_admin
+         and booking_payload ->> 'payment_status' in (
+           'pending',
+           'paid',
+           'failed',
+           'refunded',
+           'awaiting_verification',
+           'alternative_requested',
+           'cash_on_arrival',
+           'cancelled'
+         )
+      then booking_payload ->> 'payment_status'
+    when booking_payload ->> 'payment_status' in (
+           'paid',
+           'awaiting_verification',
+           'alternative_requested',
+           'cash_on_arrival'
+         )
+      then booking_payload ->> 'payment_status'
+    else 'pending'
+  end;
+
+  -- Enforce status consistency rules for new bookings
+  -- If payment_status is 'paid', status must be 'confirmed'
+  if normalized_payment_status = 'paid' and normalized_status <> 'confirmed' then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "paid", status must be "confirmed".';
+  end if;
+
+  -- If status is 'confirmed', payment_status must be 'paid'
+  if normalized_status = 'confirmed' and normalized_payment_status <> 'paid' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "confirmed", payment_status must be "paid".';
+  end if;
+
+  -- If status is 'cancelled', payment_status must be 'cancelled'
+  if normalized_status = 'cancelled' and normalized_payment_status <> 'cancelled' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "cancelled", payment_status must be "cancelled".';
+  end if;
+
+  -- If payment_status is 'cancelled', status must be 'cancelled'
+  if normalized_payment_status = 'cancelled' and normalized_status <> 'cancelled' then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "cancelled", status must be "cancelled".';
+  end if;
+
+  -- If status is 'pending_payment_verification', payment_status must be 'awaiting_verification'
+  if normalized_status = 'pending_payment_verification' and normalized_payment_status <> 'awaiting_verification' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "pending_payment_verification", payment_status must be "awaiting_verification".';
+  end if;
+
+  -- If payment_status is 'awaiting_verification', status must be 'pending_payment_verification' or 'payment_method_review'
+  if normalized_payment_status = 'awaiting_verification' and normalized_status not in ('pending_payment_verification', 'payment_method_review') then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "awaiting_verification", status must be "pending_payment_verification" or "payment_method_review".';
+  end if;
+
+  -- If status is 'payment_method_review', payment_status must be 'awaiting_verification' or 'alternative_requested'
+  if normalized_status = 'payment_method_review' and normalized_payment_status not in ('awaiting_verification', 'alternative_requested', 'cash_on_arrival') then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "payment_method_review", payment_status must be "awaiting_verification", "alternative_requested", or "cash_on_arrival".';
+  end if;
+
   normalized_services := coalesce(
     booking_payload -> 'selected_services',
     '[]'::jsonb
@@ -973,11 +1048,11 @@ begin
   if booking_start < 0
      or booking_start >= 1440
      or booking_duration <= 0
-     or booking_duration > 720
+     or not (booking_duration = any(ARRAY[60, 90, 120, 150, 180, 210, 240]))
      or booking_end > 1440 then
     raise exception using
       errcode = '22023',
-      message = 'Booking time is outside the accepted range.';
+      message = 'Booking duration must be one of: 60, 90, 120, 150, 180, 210, 240 minutes.';
   end if;
 
   if jsonb_typeof(normalized_services) <> 'array'
@@ -1080,6 +1155,7 @@ begin
     congestion_fee,
     payment_id,
     status,
+    payment_status,
     notes,
     selected_services,
     selected_durations
@@ -1107,6 +1183,7 @@ begin
     normalized_congestion_fee,
     left(nullif(trim(booking_payload ->> 'payment_id'), ''), 200),
     normalized_status,
+    normalized_payment_status,
     booking_payload ->> 'notes',
     normalized_services,
     normalized_durations
@@ -1147,6 +1224,7 @@ declare
     'congestion_fee',
     'payment_id',
     'status',
+    'payment_status',
     'notes',
     'selected_services',
     'selected_durations'
@@ -1264,6 +1342,79 @@ begin
     else 'confirmed'
   end;
 
+  normalized_payment_status := case
+    when is_admin
+         and booking_payload ->> 'payment_status' in (
+           'pending',
+           'paid',
+           'failed',
+           'refunded',
+           'awaiting_verification',
+           'alternative_requested',
+           'cash_on_arrival',
+           'cancelled'
+         )
+      then booking_payload ->> 'payment_status'
+    when booking_payload ->> 'payment_status' in (
+           'paid',
+           'awaiting_verification',
+           'alternative_requested',
+           'cash_on_arrival'
+         )
+      then booking_payload ->> 'payment_status'
+    else 'pending'
+  end;
+
+  -- Enforce status consistency rules for updates
+  -- If payment_status is 'paid', status must be 'confirmed'
+  if normalized_payment_status = 'paid' and normalized_status <> 'confirmed' then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "paid", status must be "confirmed".';
+  end if;
+
+  -- If status is 'confirmed', payment_status must be 'paid'
+  if normalized_status = 'confirmed' and normalized_payment_status <> 'paid' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "confirmed", payment_status must be "paid".';
+  end if;
+
+  -- If status is 'cancelled', payment_status must be 'cancelled'
+  if normalized_status = 'cancelled' and normalized_payment_status <> 'cancelled' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "cancelled", payment_status must be "cancelled".';
+  end if;
+
+  -- If payment_status is 'cancelled', status must be 'cancelled'
+  if normalized_payment_status = 'cancelled' and normalized_status <> 'cancelled' then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "cancelled", status must be "cancelled".';
+  end if;
+
+  -- If status is 'pending_payment_verification', payment_status must be 'awaiting_verification'
+  if normalized_status = 'pending_payment_verification' and normalized_payment_status <> 'awaiting_verification' then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "pending_payment_verification", payment_status must be "awaiting_verification".';
+  end if;
+
+  -- If payment_status is 'awaiting_verification', status must be 'pending_payment_verification' or 'payment_method_review'
+  if normalized_payment_status = 'awaiting_verification' and normalized_status not in ('pending_payment_verification', 'payment_method_review') then
+    raise exception using
+      errcode = '22023',
+      message = 'When payment_status is "awaiting_verification", status must be "pending_payment_verification" or "payment_method_review".';
+  end if;
+
+  -- If status is 'payment_method_review', payment_status must be 'awaiting_verification' or 'alternative_requested'
+  if normalized_status = 'payment_method_review' and normalized_payment_status not in ('awaiting_verification', 'alternative_requested', 'cash_on_arrival') then
+    raise exception using
+      errcode = '22023',
+      message = 'When status is "payment_method_review", payment_status must be "awaiting_verification", "alternative_requested", or "cash_on_arrival".';
+  end if;
+
   normalized_services := coalesce(
     booking_payload -> 'selected_services',
     '[]'::jsonb
@@ -1336,11 +1487,11 @@ begin
   if booking_start < 0
      or booking_start >= 1440
      or booking_duration <= 0
-     or booking_duration > 720
+     or not (booking_duration = any(ARRAY[60, 90, 120, 150, 180, 210, 240]))
      or booking_end > 1440 then
     raise exception using
       errcode = '22023',
-      message = 'Booking time is outside the accepted range.';
+      message = 'Booking duration must be one of: 60, 90, 120, 150, 180, 210, 240 minutes.';
   end if;
 
   if jsonb_typeof(normalized_services) <> 'array'
@@ -1440,6 +1591,7 @@ begin
     congestion_fee = normalized_congestion_fee,
     payment_id = left(nullif(trim(booking_payload ->> 'payment_id'), ''), 200),
     status = normalized_status,
+    payment_status = normalized_payment_status,
     notes = booking_payload ->> 'notes',
     selected_services = normalized_services,
     selected_durations = normalized_durations

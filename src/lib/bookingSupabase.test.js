@@ -32,7 +32,7 @@ setSupabaseClientFactory(async () => ({
   },
 }));
 
-assert.equal(paymentMethodToPaymentStatus("card"), "paid");
+assert.equal(paymentMethodToPaymentStatus("card"), "pending");
 assert.equal(paymentMethodToBookingStatus("bank_transfer"), "pending_payment_verification");
 assert.equal(paymentMethodToPaymentStatus("alternative_requested"), "alternative_requested");
 assert.equal(paymentMethodToBookingStatus("alternative_requested"), "payment_method_review");

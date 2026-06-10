@@ -4064,7 +4064,15 @@ function AdminWorkspace({
                 <div>
                   <span>Payment status</span>
                   {overviewEditing ? (
-                    <input value={overviewBooking.paymentStatus || ""} onChange={(event) => updateOverviewBooking({ paymentStatus: event.target.value })} />
+                    <select
+                      value={overviewBooking.paymentStatus || "awaiting_verification"}
+                      onChange={(event) => updateOverviewBooking({ paymentStatus: event.target.value })}
+                    >
+                      <option value="awaiting_verification">Awaiting verification</option>
+                      <option value="alternative_requested">Alternative requested</option>
+                      <option value="paid">Paid</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
                   ) : (
                     <strong>{overviewBooking.paymentStatus || "awaiting_verification"}</strong>
                   )}
@@ -4078,7 +4086,13 @@ function AdminWorkspace({
                   <strong>{overviewBooking.paymentHoldExpiresAt ? (new Date(overviewBooking.paymentHoldExpiresAt)).toLocaleString() : "-"}</strong>
                 </div>
                 <div>
-                  <button type="button" onClick={() => updateOverviewBooking({ paymentStatus: "paid", status: "confirmed" })}>Mark Payment Received</button>
+                  <button
+                    type="button"
+                    onClick={() => updateOverviewBooking({ paymentStatus: "paid", status: "confirmed" })}
+                    disabled={!overviewEditing}
+                  >
+                    Mark Payment Received
+                  </button>
                 </div>
                 <div className="overview-wide">
                   <span>Services</span>

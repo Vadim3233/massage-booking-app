@@ -58,17 +58,18 @@ export function normalizeStoredBooking(booking) {
 }
 
 export function paymentMethodToPaymentStatus(paymentMethod) {
-  if (paymentMethod === "card") return "paid";
+  if (paymentMethod === "card") return "pending";
   if (paymentMethod === "alternative_requested") return "alternative_requested";
   if (paymentMethod === "cash") return "awaiting_verification";
-  return "awaiting_verification";
+  return "pending";
 }
 
 export function paymentMethodToBookingStatus(paymentMethod) {
   if (paymentMethod === "bank_transfer") return "pending_payment_verification";
+  if (paymentMethod === "card") return "payment_method_review";
   if (paymentMethod === "alternative_requested") return "payment_method_review";
   if (paymentMethod === "cash") return "payment_method_review";
-  return "confirmed";
+  return "payment_method_review";
 }
 
 export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = {}) {
@@ -78,7 +79,7 @@ export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = 
   let nextStatus = nextPatch.status ?? currentBooking.status;
 
   const defaultMapping = {
-    card: { paymentStatus: "paid", status: "confirmed" },
+    card: { paymentStatus: "pending", status: "payment_method_review" },
     bank_transfer: { paymentStatus: "awaiting_verification", status: "pending_payment_verification" },
     alternative_requested: { paymentStatus: "alternative_requested", status: "payment_method_review" },
     cash: { paymentStatus: "awaiting_verification", status: "payment_method_review" },

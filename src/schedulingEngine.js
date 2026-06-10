@@ -2,6 +2,12 @@ export const VALID_DURATIONS = [60, 90, 120, 150, 180, 210, 240];
 export const DEFAULT_TRAVEL_BUFFER = 60;
 export const SLOT_INCREMENT = 30;
 
+// Strict duration validation - only allow durations in VALID_DURATIONS
+export function isValidDuration(duration) {
+  const minutes = Number(duration);
+  return Number.isFinite(minutes) && VALID_DURATIONS.includes(minutes);
+}
+
 export const DEFAULT_SERVICES = [
   { id: "deep-tissue", name: "Deep Tissue Recovery", visible: true },
   { id: "sports", name: "Performance Sports Massage", visible: true },
@@ -75,11 +81,6 @@ export function getFlow(bookings) {
 
 export function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
-}
-
-export function isValidDuration(duration) {
-  const minutes = Number(duration);
-  return Number.isFinite(minutes) && minutes >= 60 && minutes <= 300 && minutes % 5 === 0;
 }
 
 export function isSlotInsideWorkingHours(slotStart, duration, travelBuffer, settings) {
