@@ -11,6 +11,7 @@ import {
   rescheduleSingleBooking,
   validateBasketAppointments,
 } from "./bookingBasket.js";
+import { getServiceAreaFees, sanitizeServiceAreas } from "./serviceAreas.js";
 
 function startTimes(slots) {
   return slots.map((slot) => minutesToTime(slot.start));
@@ -186,6 +187,20 @@ const day = {
   });
 
   assert.deepEqual(startTimes(bufferPreview.slots), ["10:00", "14:00"]);
+}
+
+{
+  const configuredAreas = sanitizeServiceAreas([
+    { id: "mayfair", name: "Mayfair", active: true, congestionFee: 20, travelSurcharge: 15 },
+  ]);
+  assert.deepEqual(getServiceAreaFees(configuredAreas, "mayfair"), {
+    congestionFee: 20,
+    travelSurcharge: 15,
+  });
+  assert.deepEqual(getServiceAreaFees(configuredAreas, "chelsea"), {
+    congestionFee: 0,
+    travelSurcharge: 0,
+  });
 }
 
 console.log("Booking basket tests passed.");

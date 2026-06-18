@@ -6,6 +6,7 @@ export function BookingSummary({
   basketItems,
   basketTitle,
   bookingDurationMinutes,
+  bookingSubtotal,
   bookingTotal,
   checkoutAppointments,
   checkoutTotal,
@@ -13,6 +14,8 @@ export function BookingSummary({
   goToAreaStep,
   removeServiceDuration,
   selectedArea,
+  selectedAreaCongestionFee,
+  selectedAreaTravelSurcharge,
   selectedEnhancementItems,
   selectedSlotLabel,
 }) {
@@ -45,6 +48,12 @@ export function BookingSummary({
                       </div>
                     ))}
                   </div>
+                  {(appointment.congestionFee > 0 || appointment.travelFee > 0) && (
+                    <div className="summary-appointment-fees">
+                      {appointment.congestionFee > 0 && <span>Congestion fee: £{appointment.congestionFee.toFixed(2)}</span>}
+                      {appointment.travelFee > 0 && <span>Travel surcharge: £{appointment.travelFee.toFixed(2)}</span>}
+                    </div>
+                  )}
                 </article>
               ))}
             </div>
@@ -102,6 +111,13 @@ export function BookingSummary({
             <div className="summary-line"><span>Date</span><strong>{chosenDayLabel}</strong></div>
             <div className="summary-line"><span>Time</span><strong>{selectedSlotLabel}</strong></div>
             <div className="summary-line"><span>Duration</span><strong>{bookingDurationMinutes} minutes</strong></div>
+            {(selectedAreaCongestionFee > 0 || selectedAreaTravelSurcharge > 0) && (
+              <div className="summary-fee-breakdown">
+                <div><span>Base price</span><strong>£{bookingSubtotal.toFixed(2)}</strong></div>
+                {selectedAreaCongestionFee > 0 && <div><span>Congestion fee</span><strong>£{selectedAreaCongestionFee.toFixed(2)}</strong></div>}
+                {selectedAreaTravelSurcharge > 0 && <div><span>Travel surcharge</span><strong>£{selectedAreaTravelSurcharge.toFixed(2)}</strong></div>}
+              </div>
+            )}
             <div className="summary-total"><span>Total</span><strong>{"\u00a3"}{bookingTotal.toFixed(2)}</strong></div>
           </>
         )}

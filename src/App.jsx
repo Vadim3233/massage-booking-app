@@ -18,7 +18,7 @@ import {
   getBasketAwareSchedulingPreview,
   validateBasketAppointments,
 } from "./lib/bookingBasket.js";
-import { sanitizeServiceAreas, serviceAreas as DEFAULT_SERVICE_AREAS } from "./lib/serviceAreas.js";
+import { getServiceAreaFees, sanitizeServiceAreas, serviceAreas as DEFAULT_SERVICE_AREAS } from "./lib/serviceAreas.js";
 import {
   buildBookingClientLink,
   ensureCurrentClientBookingAddress,
@@ -1188,13 +1188,15 @@ function ClientBookingInterface({
   const activeEnhancements = enhancements.filter((item) => item.active !== false);
   const activeServiceAreas = serviceAreas.filter((area) => area.active !== false);
   const selectedArea = activeServiceAreas.find((area) => area.id === selectedAreaId) ?? null;
+  const selectedAreaFees = getServiceAreaFees(serviceAreas, selectedAreaId);
   const selectedEnhancementItems = activeEnhancements.filter((item) => selectedEnhancements.includes(item.id));
   const selectedEnhancementTotal = activeEnhancements
     .filter((item) => selectedEnhancements.includes(item.id))
     .reduce((total, item) => total + item.price, 0);
   const selectedEnhancementMinutes = selectedEnhancementItems.reduce((total, item) => total + (Number(item.durationMinutes) || 0), 0);
   const bookingDurationMinutes = orderTotalMinutes + selectedEnhancementMinutes;
-  const bookingTotal = basePrice + selectedEnhancementTotal;
+  const bookingSubtotal = basePrice + selectedEnhancementTotal;
+  const bookingTotal = bookingSubtotal + selectedAreaFees.congestionFee + selectedAreaFees.travelSurcharge;
   const checkoutTotal = checkoutAppointments.reduce((total, item) => total + item.total, 0);
   const selectedDayBasketBookings = checkoutAppointments.filter((appointment) => appointment.dateValue === selectedDay.dateValue);
   const clientPreview = getBasketAwareSchedulingPreview({
@@ -1298,7 +1300,7 @@ function ClientBookingInterface({
 
     return {
       appointment: {
-        congestionFee: 0,
+        congestionFee: selectedAreaFees.congestionFee,
         dateLabel: chosenDayLabel,
         dateValue: selectedDay.dateValue,
         dayIndex: clientDayIndex,
@@ -1311,7 +1313,7 @@ function ClientBookingInterface({
           ...basketItems.map((item) => ({ id: item.id, minutes: item.minutes, name: item.name, price: item.price ?? 0 })),
           ...selectedEnhancementItems.map((item) => ({ id: item.id, minutes: Number(item.durationMinutes) || 0, name: item.name, price: item.price })),
         ],
-        price: bookingTotal,
+        price: bookingSubtotal,
         selectedAreaId: selectedArea.id,
         selectedAreaName: selectedArea.name,
         serviceId: primaryServiceId,
@@ -1320,7 +1322,7 @@ function ClientBookingInterface({
         slot: clientSelectedSlot,
         total: bookingTotal,
         travelBuffer: DEFAULT_TRAVEL_BUFFER,
-        travelFee: 0,
+        travelFee: selectedAreaFees.travelSurcharge,
       },
     };
   }
@@ -1765,6 +1767,7 @@ function ClientBookingInterface({
     basketItems,
     basketTitle,
     bookingDurationMinutes,
+    bookingSubtotal,
     bookingTotal,
     checkoutAppointments,
     checkoutTotal,
@@ -1772,6 +1775,8 @@ function ClientBookingInterface({
     goToAreaStep,
     removeServiceDuration,
     selectedArea,
+    selectedAreaCongestionFee: selectedAreaFees.congestionFee,
+    selectedAreaTravelSurcharge: selectedAreaFees.travelSurcharge,
     selectedEnhancementItems,
     selectedSlotLabel,
   };
