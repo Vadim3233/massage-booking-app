@@ -26,12 +26,14 @@ function formatMoney(value) {
   return `£${amount.toFixed(2)}`;
 }
 
-function friendlyPaymentStatus(status) {
+function friendlyPaymentStatus(status, bookingStatus = "") {
   const s = String(status || "").toLowerCase();
+  const bookingState = String(bookingStatus || "").toLowerCase();
   if (s === "awaiting_verification" || s === "bank transfer pending" || s === "pending") return "Awaiting Payment Verification";
   if (s === "pending_payment_verification") return "Awaiting Payment Verification";
   if (s === "alternative_requested" || s === "payment_method_review") return "Alternative payment request under review";
-  if (s === "cash_on_arrival") return "Cash on arrival pending approval";
+  if (s === "cash_on_arrival" && bookingState === "confirmed") return "Approved - Due on Arrival";
+  if (s === "cash_on_arrival") return "Payment on Arrival - Awaiting Admin Approval";
   if (s === "paid") return "Paid";
   if (s === "cancelled") return "Cancelled";
   return String(status || "Not provided");
@@ -145,7 +147,10 @@ export function buildAdminTelegramMessage(type, payload = {}) {
       formatLine("Time", bookingTime(booking)),
       formatLine("Amount Due", formatMoney(booking.price || booking.total || payload.total)),
       formatLine("Payment Method", (booking.paymentMethod || payload.paymentMethod || "Bank Transfer")),
-      formatLine("Payment Status", friendlyPaymentStatus(booking.paymentStatus || payload.paymentStatus)),
+      formatLine("Payment Status", friendlyPaymentStatus(
+        booking.paymentStatus || payload.paymentStatus,
+        booking.status || payload.bookingStatus
+      )),
       formatLine("Reservation Expires", formatDateTime(booking.paymentHoldExpiresAt || payload.paymentHoldExpiresAt)),
       formatLine("Booking ID", booking.id || payload.bookingId),
       booking.orderId ? formatLine("Order ID", booking.orderId) : null,
@@ -194,7 +199,10 @@ export function buildAdminTelegramMessage(type, payload = {}) {
       formatLine("Reference", booking.bookingReference || payload.bookingReference || booking.id || payload.bookingId),
       formatLine("Client", booking.clientName || payload.clientName),
       formatLine("Amount", formatMoney(payload.amount || booking.price || booking.total)),
-      formatLine("Payment Status", friendlyPaymentStatus(payload.status || booking.paymentStatus)),
+      formatLine("Payment Status", friendlyPaymentStatus(
+        payload.status || booking.paymentStatus,
+        payload.bookingStatus || booking.status
+      )),
       formatLine("Method", (payload.paymentMethod || booking.paymentMethod || "Not provided")),
       formatLine("Reservation Expires", formatDateTime(booking.paymentHoldExpiresAt || payload.paymentHoldExpiresAt)),
     ]);

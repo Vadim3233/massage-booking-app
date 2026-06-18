@@ -60,6 +60,14 @@ import { emailTemplates } from "../server/emailTemplates.js";
 {
   assert.equal(friendlyPaymentStatus("pending_payment_verification"), "Awaiting Payment Verification");
   assert.equal(friendlyPaymentStatus("payment_method_review"), "Alternative payment request under review");
+  assert.equal(
+    friendlyPaymentStatus("cash_on_arrival", "payment_method_review"),
+    "Payment on Arrival - Awaiting Admin Approval"
+  );
+  assert.equal(
+    friendlyPaymentStatus("cash_on_arrival", "confirmed"),
+    "Approved - Due on Arrival"
+  );
 }
 
 // Test 5: Telegram/email formatting includes booking reference/payment status/expiry
@@ -99,7 +107,7 @@ import { emailTemplates } from "../server/emailTemplates.js";
   assert.ok(email.html.includes("Payment details"), "Email should include payment details section");
 }
 
-// Test 6: Cash-on-arrival and review states should still be treated as pending, not confirmed.
+// Test 6: Cash-on-arrival request should clearly signal pending admin approval.
 {
   const email = emailTemplates.bookingConfirmation({
     customer: { name: "Jamie Cash" },
@@ -115,11 +123,48 @@ import { emailTemplates } from "../server/emailTemplates.js";
   });
 
   assert.ok(
-    email.subject.toLowerCase().includes("pending") || email.subject.toLowerCase().includes("awaiting"),
+    email.subject.toLowerCase().includes("payment on arrival"),
     "Cash-on-arrival review email should signal pending approval"
+  );
+  assert.ok(
+    email.html.includes("Payment on arrival is awaiting admin approval"),
+    "Cash-on-arrival review email should explain the approval state"
   );
   assert.ok(email.html.includes("VAD-CASH-1"), "Email should include booking reference for cash reviews");
   assert.ok(email.html.includes("Payment details"), "Email should include payment details section for cash reviews");
+  assert.ok(!email.html.includes("<strong>Bank:</strong>"), "Cash-on-arrival email should not include bank details");
+}
+
+// Test 7: Approved cash-on-arrival remains due on arrival, rather than becoming paid.
+{
+  const email = emailTemplates.bookingConfirmation({
+    customer: { name: "Jamie Cash" },
+    appointments: [],
+    date: "14 June 2026",
+    time: "16:00",
+    total: 95,
+    bookingReference: "VAD-CASH-2",
+    status: "confirmed",
+    paymentMethod: "cash",
+    paymentStatus: "cash_on_arrival",
+  });
+  const telegram = buildAdminTelegramMessage("payment_status", {
+    amount: 95,
+    booking: {
+      bookingReference: "VAD-CASH-2",
+      clientName: "Jamie Cash",
+      paymentMethod: "cash",
+      paymentStatus: "cash_on_arrival",
+      status: "confirmed",
+    },
+    bookingStatus: "confirmed",
+    paymentMethod: "cash",
+    status: "cash_on_arrival",
+  });
+
+  assert.ok(email.html.includes("Your booking is confirmed. Payment is due on arrival."));
+  assert.ok(email.text.includes("Payment is due on arrival."));
+  assert.ok(telegram.includes("Approved - Due on Arrival"));
 }
 
 console.log("Reservation flow tests passed.");
