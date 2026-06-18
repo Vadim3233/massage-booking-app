@@ -249,6 +249,7 @@ function AdminWorkspace({
           requestedTravelBuffer={requestedTravelBuffer}
           selectedDay={selectedDay}
           selectedDayIndex={selectedDayIndex}
+          settings={settings}
         />
       )}
 

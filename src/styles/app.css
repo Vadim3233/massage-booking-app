@@ -10117,3 +10117,242 @@ h3,
     min-width: 0;
   }
 }
+.settings-folder-shell {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 820px);
+}
+
+.admin-service-area-fees {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.admin-service-area-fees label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-service-area-fees span {
+  color: var(--admin-muted, #5f6b7f);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.admin-service-area-fees input {
+  box-sizing: border-box;
+  min-height: 44px;
+  width: 100%;
+}
+
+.summary-fee-breakdown,
+.summary-appointment-fees {
+  display: grid;
+  gap: 6px;
+}
+
+.summary-fee-breakdown {
+  border-top: 1px solid rgba(25, 55, 95, 0.12);
+  padding: 12px 0;
+}
+
+.summary-fee-breakdown div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.summary-appointment-fees {
+  border-top: 1px solid rgba(25, 55, 95, 0.1);
+  color: #5f6b7f;
+  font-size: 0.8rem;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+@media (max-width: 430px) {
+  .admin-service-area-fees {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-home-heading {
+  border-bottom: 1px solid var(--admin-line);
+  padding-bottom: 14px;
+}
+
+.settings-folder-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--admin-line);
+  padding-bottom: 14px;
+}
+
+.settings-folder-header p,
+.settings-folder-header h2 {
+  margin: 0;
+}
+
+.settings-folder-header p {
+  color: var(--admin-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-folder-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  border: 1px solid var(--admin-line);
+  padding: 0.65rem 0.85rem;
+  background: #fff;
+  color: var(--admin-ink);
+}
+
+.settings-folder-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--admin-line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.settings-folder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-bottom: 1px solid var(--admin-line);
+  border-radius: 0;
+  padding: 0.8rem 1rem;
+  background: #fff;
+  color: var(--admin-ink);
+  font-weight: 750;
+  text-align: left;
+}
+
+.settings-folder-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-folder-row:hover,
+.settings-folder-row:focus-visible {
+  background: #f5f8fb;
+}
+
+.settings-folder-row > span:last-child {
+  color: var(--admin-muted);
+  font-size: 1.05rem;
+}
+
+.settings-current-row {
+  background: #f9fbfd;
+}
+
+.settings-placeholder {
+  border: 1px solid var(--admin-line);
+  border-radius: 14px;
+  padding: 22px;
+  background: #fff;
+}
+
+.settings-placeholder h3,
+.settings-placeholder p {
+  margin: 0;
+}
+
+.settings-placeholder p {
+  margin-top: 6px;
+  color: var(--admin-muted);
+}
+
+.settings-current-content {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .settings-folder-shell {
+    gap: 14px;
+  }
+
+  .settings-folder-header {
+    align-items: flex-start;
+  }
+
+  .settings-folder-row {
+    min-height: 50px;
+    padding: 0.72rem 0.85rem;
+  }
+}
+
+.payment-choice-list {
+  display: grid;
+  gap: 12px;
+}
+
+.payment-choice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid var(--booking-line);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: var(--booking-ink);
+  background: #fff;
+  text-align: left;
+}
+
+.payment-choice span {
+  color: var(--booking-muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.payment-choice:disabled:not(.active-payment-choice) {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.active-payment-choice {
+  border-color: rgba(33, 113, 185, 0.34);
+  background: rgba(235, 246, 255, 0.88);
+}
+
+.active-payment-choice:not(:disabled):hover,
+.active-payment-choice:not(:disabled):focus-visible {
+  border-color: var(--booking-blue);
+  box-shadow: 0 8px 24px rgba(42, 111, 176, 0.12);
+}
+
+.payment-approval-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.payment-approval-actions button {
+  min-height: 44px;
+  white-space: normal;
+}
+
+@media (max-width: 430px) {
+  .payment-approval-actions > div,
+  .payment-approval-actions button {
+    width: 100%;
+  }
+}

@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/schedulingEngine.test.js && node src/lib/bookingBasket.test.js && node src/lib/clientData.test.js && node src/lib/bookingSupabase.test.js && node src/lib/apiSecretProtection.test.js && node src/lib/securitySchema.test.js",
+    "test": "node src/schedulingEngine.test.js && node src/lib/bookingBasket.test.js && node src/lib/clientData.test.js && node src/lib/bookingSupabase.test.js && node src/lib/apiSecretProtection.test.js && node src/lib/securitySchema.test.js && node src/lib/adminWorkspace.test.js && node src/reservationFlow.test.js",
     "test:engine": "node src/schedulingEngine.test.js",
     "test:basket": "node src/lib/bookingBasket.test.js",
     "test:client-data": "node src/lib/clientData.test.js",

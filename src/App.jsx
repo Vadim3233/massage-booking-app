@@ -47,7 +47,6 @@ import { BookAgainPanel } from "./components/Client/BookAgainPanel.jsx";
 import { buildAdminCustomers } from "./components/Admin/adminCustomers.js";
 import { BusinessAnalyticsDashboard } from "./components/Admin/BusinessAnalyticsDashboard.jsx";
 import { AdminLogin } from "./components/Admin/AdminLogin.jsx";
-import AdminWorkspace from "./components/Admin/AdminWorkspace.jsx";
 import { BookingSummary } from "./components/Booking/BookingSummary.jsx";
 import { BookingTopbar } from "./components/Booking/BookingTopbar.jsx";
 import { Timeline } from "./components/Calendar/Timeline.jsx";
@@ -253,11 +252,9 @@ function notifyAdminTelegram(type, payload = {}) {
 }
 async function postTelegramTest() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
-  const endpoints = [
-    "/api/telegram-test",
-    "http://127.0.0.1:8787/api/telegram-test",
-    ...(apiBaseUrl ? [`${apiBaseUrl}/api/telegram-test`] : []),
-  ];
+  const endpoints = apiBaseUrl
+    ? [`${apiBaseUrl.replace(/\/$/, "")}/api/telegram-test`]
+    : ["/api/telegram-test", "http://127.0.0.1:8787/api/telegram-test"];
 
   let lastError = null;
 
@@ -1071,10 +1068,9 @@ function ClientBookingInterface({
   const [checkoutAppointments, setCheckoutAppointments] = useState([]);
   const [checkoutError, setCheckoutError] = useState("");
   const [confirmedAppointments, setConfirmedAppointments] = useState([]);
-  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [bookingReference, setBookingReference] = useState("");
   const [paymentHoldExpiresAt, setPaymentHoldExpiresAt] = useState(null);
-  const [alternativeModalOpen, setAlternativeModalOpen] = useState(false);
   useEffect(() => {
     if (clientStep === "checkout" && !bookingReference) {
       const ref = `VB-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0,14)}`;
@@ -1082,7 +1078,6 @@ function ClientBookingInterface({
       setPaymentHoldExpiresAt(new Date(Date.now() + 60 * 60 * 1000).toISOString());
     }
   }, [clientStep, bookingReference]);
-  const holdMinutesLeft = paymentHoldExpiresAt ? Math.max(0, Math.ceil((new Date(paymentHoldExpiresAt).getTime() - Date.now()) / 60000)) : 0;
   const [selectedEnhancements, setSelectedEnhancements] = useState([]);
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -1619,7 +1614,7 @@ function ClientBookingInterface({
     setClientStep("time");
   }
 
-  async function confirmPayment() {
+  async function confirmPayment(selectedPaymentMethod = paymentMethod) {
     if (checkoutAppointments.length === 0) {
       setCheckoutError("Add at least one appointment before checkout.");
       return;
@@ -1663,9 +1658,9 @@ function ClientBookingInterface({
           total: checkoutTotal,
         },
         appointments: checkoutAppointments,
-        paymentMethod,
+        paymentMethod: selectedPaymentMethod,
         bookingReference,
-        paymentHoldExpiresAt,
+        paymentHoldExpiresAt: selectedPaymentMethod === "cash" ? null : paymentHoldExpiresAt,
         savedAddressId: selectedSavedAddressId,
       });
 
@@ -1676,74 +1671,17 @@ function ClientBookingInterface({
         setConfirmedAppointments(checkoutAppointments);
         setCheckoutAppointments([]);
         resetCurrentAppointmentDraft();
-        setClientBookingMessage("");
+        setPaymentMethod(selectedPaymentMethod);
+        setClientBookingMessage(
+          selectedPaymentMethod === "cash"
+            ? "Your booking request has been received. Payment on arrival is awaiting admin approval."
+            : ""
+        );
         confirmationViewOpened = true;
       }
     } catch (error) {
       logBookingConfirmation("confirmation view failed", error);
       setCheckoutError(error?.message || "Your appointment could not be confirmed. Please try again.");
-    } finally {
-      if (!confirmationViewOpened) {
-        resetClientConfirmGuard();
-      }
-    }
-  }
-
-  async function requestAlternativePayment() {
-    setCheckoutError("");
-    let confirmationViewOpened = false;
-
-    try {
-      const confirmed = await onConfirmBooking({
-        customer: {
-          email: contactDetails.email.trim(),
-          name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
-          phone: contactDetails.phone.trim(),
-          telegramUpdates: contactDetails.telegramUpdates,
-        },
-        emailPayload: {
-          appointments: checkoutAppointments.map((appointment) => ({
-            date: appointment.dateLabel,
-            durationMinutes: appointment.duration,
-            items: appointment.items,
-            location: appointment.selectedAreaName,
-            manageUrl: `mailto:bookings@vadmassage.com?subject=${encodeURIComponent(`Manage booking ${appointment.dateValue} ${minutesToTime(appointment.start)}`)}`,
-            price: appointment.total,
-            serviceName: appointment.serviceName,
-            time: `${minutesToTime(appointment.start)} - ${minutesToTime(appointment.end)}`,
-          })),
-          customer: {
-            email: contactDetails.email.trim(),
-            name: `${contactDetails.firstName} ${contactDetails.lastName}`.trim(),
-            phone: contactDetails.phone.trim(),
-            telegramUpdates: contactDetails.telegramUpdates,
-          },
-          address: contactDetails.address.trim(),
-          notes: contactDetails.notes.trim(),
-          date: checkoutAppointments[0]?.dateLabel ?? "",
-          durationMinutes: checkoutAppointments.reduce((total, appointment) => total + appointment.duration, 0),
-          items: checkoutAppointments.flatMap((appointment) => appointment.items),
-          location: checkoutAppointments.map((appointment) => appointment.selectedAreaName).filter(Boolean).join(", "),
-          time: checkoutAppointments.length === 1 ? `${minutesToTime(checkoutAppointments[0].start)} - ${minutesToTime(checkoutAppointments[0].end)}` : `${checkoutAppointments.length} appointments`,
-          total: checkoutTotal,
-        },
-        appointments: checkoutAppointments,
-        paymentMethod: "alternative_requested",
-        savedAddressId: selectedSavedAddressId,
-      });
-
-      if (confirmed) {
-        setAlternativeModalOpen(false);
-        releaseCheckoutHolds(checkoutAppointments);
-        setActiveBookingHold(null);
-        setConfirmedAppointments(checkoutAppointments);
-        setCheckoutAppointments([]);
-        resetCurrentAppointmentDraft();
-        setClientBookingMessage("");
-        confirmationViewOpened = true;
-      }
-    } catch (error) {
-      setCheckoutError(error?.message || "Your request could not be submitted. Please try again.");
     } finally {
       if (!confirmationViewOpened) {
         resetClientConfirmGuard();
@@ -2083,7 +2021,14 @@ function ClientBookingInterface({
               </button>
             </div>
             {waitlistFormOpen && (
-              <form className="waitlist-form compact-waitlist-form" onSubmit={onJoinWaitlist}>
+              <form
+                className="waitlist-form compact-waitlist-form"
+                onSubmit={(event) => onJoinWaitlist(event, {
+                  areaName: selectedArea?.name || "",
+                  email: contactDetails.email,
+                  phone: contactDetails.phone,
+                })}
+              >
                 <input
                   type="text"
                   required
@@ -2198,7 +2143,7 @@ function ClientBookingInterface({
           <div className="booking-main-panel">
             {confirmedAppointments.length > 0 ? (
               <>
-                <h2>Your appointments are confirmed</h2>
+                <h2>{paymentMethod === "cash" ? "Your booking request has been received" : "Your appointments are confirmed"}</h2>
                 <div className="checkout-appointment-list">
                   {confirmedAppointments.map((appointment) => (
                     <article className="checkout-appointment-card confirmed-appointment-card" key={appointment.id}>
@@ -2259,32 +2204,23 @@ function ClientBookingInterface({
                       <strong>{"\u00a3"}{checkoutTotal.toFixed(2)}</strong>
                     </div>
                   </div>
-                  <div className="reservation-row">
-                    <span>Wise</span>
-                    <div>
-                      <small>Wise payment link</small>
-                      <strong><em>Payment link placeholder</em></strong>
-                      <div><button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText("https://wise.example/payment"); }}>Copy link</button></div>
-                    </div>
-                  </div>
-                  <div className="reservation-row">
-                    <span>Bank</span>
-                    <div>
-                      <small>Bank details</small>
-                      <strong>Account: 12345678 | Sort: 12-34-56 | Name: VAD Massage</strong>
-                      <div><button type="button" onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText("Account: 12345678 Sort: 12-34-56 Name: VAD Massage"); }}>Copy</button></div>
-                    </div>
-                  </div>
-                  <p className="booking-note">Your selected appointment time is reserved for 60 minutes while payment is completed.</p>
-                  <p className="booking-note">Your booking will be confirmed once payment has been received and verified.</p>
-                  <div className="reservation-expiry">Reservation expires in <strong>{holdMinutesLeft} minutes</strong></div>
-                  {checkoutError && <p className="booking-validation-message">{checkoutError}</p>}
-                  <div className="reservation-actions">
-                    <button type="button" className="pay-button" disabled={checkoutAppointments.length === 0 || clientIsConfirming} onClick={confirmPayment}>
-                      {clientIsConfirming ? "Confirming..." : "I've completed the bank transfer"}
+                  <div className="payment-choice-list" aria-label="Payment options">
+                    <button type="button" className="payment-choice" disabled>
+                      <strong>Pay by Stripe</strong>
+                      <span>Not available yet</span>
                     </button>
-                    <button type="button" className="alternative-link" onClick={() => setAlternativeModalOpen(true)}>Can't pay by bank transfer?</button>
+                    <button
+                      type="button"
+                      className="payment-choice active-payment-choice"
+                      disabled={checkoutAppointments.length === 0 || clientIsConfirming}
+                      onClick={() => confirmPayment("cash")}
+                    >
+                      <strong>{clientIsConfirming ? "Submitting request..." : "Request payment on arrival"}</strong>
+                      <span>Requires admin approval before the appointment is confirmed.</span>
+                    </button>
                   </div>
+                  <p className="booking-note">Your appointment request will remain pending until payment on arrival is approved.</p>
+                  {checkoutError && <p className="booking-validation-message">{checkoutError}</p>}
                 </div>
               </>
             )}
@@ -2307,19 +2243,6 @@ function ClientBookingInterface({
             <p>{fullDescriptionService.longDescription}</p>
             <button type="button" onClick={() => selectDescriptionService(fullDescriptionService.id)}>Select service</button>
             <button type="button" className="modal-close" onClick={() => setFullDescriptionServiceId(null)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {alternativeModalOpen && (
-        <div className="booking-modal-backdrop" role="presentation">
-          <div className="booking-modal alternative-payment-modal" role="dialog" aria-modal="true">
-            <h2>Need another payment option?</h2>
-            <p>If bank transfer isn't convenient, you can request an alternative payment arrangement for this booking. Requests are reviewed individually.</p>
-            <div className="modal-actions">
-              <button type="button" onClick={async () => { await requestAlternativePayment(); }}>Request alternative payment method</button>
-              <button type="button" className="modal-close" onClick={() => setAlternativeModalOpen(false)}>Close</button>
-            </div>
           </div>
         </div>
       )}
@@ -2374,6 +2297,64 @@ const ADMIN_TABS = [
   { id: "waitlist", label: "Waitlist" },
   { id: "analytics", label: "Analytics" },
   { id: "settings", label: "Settings" },
+];
+
+const SETTINGS_NAVIGATION = [
+  {
+    id: "scheduling",
+    label: "Scheduling & Availability",
+    sections: ["Working Hours", "Travel Buffer", "Chain Mode / Availability Rules", "Blocked Time"],
+  },
+  {
+    id: "coverage",
+    label: "Coverage Areas",
+    sections: ["Service Areas", "Travel Charges", "Congestion Zone Fee", "Coverage Rules"],
+  },
+  {
+    id: "services",
+    label: "Services & Pricing",
+    sections: ["Treatments", "Enhancements", "Durations & Buffers", "Pricing"],
+  },
+  {
+    id: "waitlist",
+    label: "Waitlist",
+    sections: ["Waitlist Rules", "Client Requests", "Offer Settings"],
+  },
+  {
+    id: "payments",
+    label: "Payments",
+    sections: ["Payment Methods", "Payment Statuses", "Pay Later"],
+  },
+  {
+    id: "financial",
+    label: "Financial Analysis",
+    sections: ["Revenue Overview", "Tax Estimates", "Exports"],
+  },
+  {
+    id: "documents",
+    label: "Receipts & Documents",
+    sections: ["Business Details", "Receipt Layout", "Invoice Settings", "Email Receipt Template", "Cancellation Text"],
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    sections: ["Telegram", "Email", "Booking Alerts"],
+  },
+  {
+    id: "clients",
+    label: "Clients & Rebooking",
+    sections: ["Client Details", "Returning Clients", "Rebooking Preferences"],
+  },
+  {
+    id: "security",
+    label: "Security",
+    sections: ["Admin Access", "Client Privacy", "API Protection"],
+  },
+  {
+    id: "system",
+    label: "System",
+    sections: ["Stored Data", "Integrations", "Application Information"],
+  },
 ];
 
 const SERVICE_COLORS = ["#6ea8fe", "#8fd6b3", "#f4bf75", "#d6a3f5", "#f09393"];
@@ -2464,6 +2445,2013 @@ function itemsForBooking(booking) {
 function mapUrlForBooking(booking) {
   const destination = booking.address || booking.location || "";
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destination)}`;
+}
+
+function paymentMethodLabel(paymentMethod) {
+  if (paymentMethod === "cash") return "Payment on arrival";
+  if (paymentMethod === "card") return "Stripe";
+  if (paymentMethod === "bank_transfer") return "Bank transfer";
+  if (paymentMethod === "alternative_requested") return "Alternative payment requested";
+  return paymentMethod || "Not selected";
+}
+
+function paymentStatusLabel(paymentStatus, bookingStatus) {
+  if (paymentStatus === "cash_on_arrival") {
+    return bookingStatus === "confirmed" ? "Approved - due on arrival" : "Awaiting admin approval";
+  }
+  if (paymentStatus === "awaiting_verification") return "Awaiting verification";
+  if (paymentStatus === "alternative_requested") return "Alternative requested";
+  if (paymentStatus === "paid") return "Paid";
+  if (paymentStatus === "cancelled") return "Rejected / cancelled";
+  if (paymentStatus === "pending") return "Pending";
+  return paymentStatus || "Not selected";
+}
+
+function bookingTotalDue(booking) {
+  return (
+    Number(booking?.price || 0)
+    + Number(booking?.congestionFee || 0)
+    + Number(booking?.travelFee || 0)
+  );
+}
+
+function bookingEmailPayload(booking) {
+  return {
+    address: booking.address || "",
+    bookingReference: booking.bookingReference || booking.id || "",
+    customer: { name: booking.clientName || "there" },
+    date: booking.dateValue || "",
+    durationMinutes: booking.duration || 0,
+    items: itemsForBooking(booking),
+    location: booking.location || "",
+    paymentMethod: booking.paymentMethod || "",
+    paymentStatus: booking.paymentStatus || "",
+    status: booking.status || "",
+    time: `${minutesToTime(booking.start)} - ${minutesToTime(booking.sessionEnd ?? (Number(booking.start) + Number(booking.duration || 0)))}`,
+    total: bookingTotalDue(booking),
+  };
+}
+
+function AdminWorkspace({
+  bookings,
+  coverageZones,
+  days,
+  onCloseWaitlistRequest,
+  onCreateAppointment,
+  onCreatePersonalEvent,
+  onDeleteBooking,
+  onDuplicateBooking,
+  onAddEnhancement,
+  onDeleteEnhancement,
+  onUpdateEnhancement,
+  onResetCurrentDay,
+  onResetStoredData,
+  onSendWaitlistOffer,
+  onServiceDetailChange,
+  onServiceNameChange,
+  onServiceVisibilityChange,
+  onSetActiveView,
+  onSetSelectedDayIndex,
+  onUpdateBooking,
+  onUpdateCoverageZone,
+  onAddServiceArea,
+  onDeleteServiceArea,
+  onUpdateServiceArea,
+  onUpdateSetting,
+  preview,
+  requestedDuration,
+  requestedTravelBuffer,
+  selectedDay,
+  selectedDayIndex,
+  serviceAreas,
+  services,
+  serviceDetails,
+  enhancements,
+  settings,
+  waitlistEntries,
+}) {
+  const [activeTab, setActiveTab] = useState("calendar");
+  const [calendarMode, setCalendarMode] = useState("agenda");
+  const [sideMenuOpen, setSideMenuOpen] = useState(false);
+  const [selectedSettingsCategory, setSelectedSettingsCategory] = useState(null);
+  const [selectedSettingsSubsection, setSelectedSettingsSubsection] = useState(null);
+  const [settingsReturnCategory, setSettingsReturnCategory] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [calendarConnections, setCalendarConnections] = useState({ google: false, microsoft: false });
+  const [editingServiceId, setEditingServiceId] = useState(null);
+  const [overviewBooking, setOverviewBooking] = useState(null);
+  const [overviewEditing, setOverviewEditing] = useState(false);
+  const [overviewMoreOpen, setOverviewMoreOpen] = useState(false);
+  const [overviewTab, setOverviewTab] = useState("details");
+  const [workingRulesDraft, setWorkingRulesDraft] = useState(() => ({ ...settings }));
+  const [appointmentWizardOpen, setAppointmentWizardOpen] = useState(false);
+  const [appointmentStep, setAppointmentStep] = useState("services");
+  const [appointmentDayIndex, setAppointmentDayIndex] = useState(selectedDayIndex);
+  const [appointmentSlot, setAppointmentSlot] = useState(null);
+  const [appointmentCustomerId, setAppointmentCustomerId] = useState("");
+  const [appointmentCustomerSearch, setAppointmentCustomerSearch] = useState("");
+  const [appointmentAddCustomerOpen, setAppointmentAddCustomerOpen] = useState(false);
+  const [appointmentNewCustomer, setAppointmentNewCustomer] = useState({ address: "", email: "", name: "", phone: "" });
+  const [customAppointmentCustomers, setCustomAppointmentCustomers] = useState([]);
+  const [appointmentServiceMinutes, setAppointmentServiceMinutes] = useState({});
+  const [activeAppointmentServiceId, setActiveAppointmentServiceId] = useState(null);
+  const [appointmentLeavePromptOpen, setAppointmentLeavePromptOpen] = useState(false);
+  const [personalEventOpen, setPersonalEventOpen] = useState(false);
+  const [personalEventTitle, setPersonalEventTitle] = useState("Personal event");
+  const [personalEventStartDate, setPersonalEventStartDate] = useState(selectedDay.dateValue);
+  const [personalEventEndDate, setPersonalEventEndDate] = useState(selectedDay.dateValue);
+  const [personalEventStartTime, setPersonalEventStartTime] = useState("15:00");
+  const [personalEventEndTime, setPersonalEventEndTime] = useState("20:00");
+  const [personalEventError, setPersonalEventError] = useState("");
+  const [adminActionMessage, setAdminActionMessage] = useState("");
+  const [telegramTestStatus, setTelegramTestStatus] = useState({ message: "", sending: false, type: "" });
+  const [coverageZoneDraft, setCoverageZoneDraft] = useState(() => ({
+    preapproval: coverageZones.preapproval.join(", "),
+    usual: coverageZones.usual.join(", "),
+  }));
+
+  const selectedDayBookings = getBookingBlocks(bookings);
+  const baseCustomers = buildAdminCustomers(days, waitlistEntries, getEffectiveWaitlistStatus);
+  const allCustomers = [
+    ...customAppointmentCustomers,
+    ...baseCustomers.filter((customer) => !customAppointmentCustomers.some((custom) => custom.id === customer.id)),
+  ];
+  const selectedCustomer = allCustomers.find((customer) => customer.id === selectedCustomerId) ?? allCustomers[0];
+  const filteredCustomers = allCustomers.filter((customer) =>
+    customer.name.toLowerCase().includes(customerSearch.trim().toLowerCase())
+  );
+  const serviceCards = services.map((service, index) => ({
+    ...service,
+    color: SERVICE_COLORS[index % SERVICE_COLORS.length],
+    ...(serviceDetails[service.id] ?? {
+      buffer: service.id === "head-massage" ? 30 : DEFAULT_TRAVEL_BUFFER,
+      duration: service.id === "head-massage" ? 60 : 90,
+      price: service.id === "head-massage" ? 78 : 120 + index * 12,
+    }),
+  }));
+  const filteredServices = serviceCards.filter((service) =>
+    service.name.toLowerCase().includes(serviceSearch.trim().toLowerCase())
+  );
+  const appointmentItems = serviceCards
+    .filter((service) => Number(appointmentServiceMinutes[service.id]) > 0)
+    .map((service) => {
+      const minutes = Number(appointmentServiceMinutes[service.id]);
+      const baseDuration = Math.max(1, Number(service.duration) || 60);
+      const price = Math.round((Number(service.price) || 0) * (minutes / baseDuration));
+      return { ...service, minutes, linePrice: price };
+    });
+  const appointmentDuration = appointmentItems.reduce((total, item) => total + item.minutes, 0);
+  const appointmentTravelBuffer = appointmentItems.length === 0
+    ? DEFAULT_TRAVEL_BUFFER
+    : Math.max(...appointmentItems.map((item) => Number(item.buffer) || DEFAULT_TRAVEL_BUFFER));
+  const appointmentTotal = appointmentItems.reduce((total, item) => total + item.linePrice, 0);
+  const appointmentDay = days[appointmentDayIndex] ?? selectedDay;
+  const currentDateValue = todayValue();
+  const appointmentPreview = appointmentDuration > 0 && isValidDuration(appointmentDuration)
+    ? getSchedulingPreview({
+        settings: appointmentDay.settings,
+        bookings: appointmentDay.bookings,
+        requestedDuration: appointmentDuration,
+        requestedTravelBuffer: appointmentTravelBuffer,
+      })
+    : { slots: [], warnings: [] };
+  const appointmentCustomerResults = allCustomers.filter((customer) =>
+    customer.name.toLowerCase().includes(appointmentCustomerSearch.trim().toLowerCase())
+  );
+  const appointmentCustomer = allCustomers.find((customer) => customer.id === appointmentCustomerId) ?? null;
+  const appointmentCanCreate = Boolean(appointmentSlot && appointmentCustomer && appointmentItems.length > 0 && isValidDuration(appointmentDuration));
+  const appointmentHasUnsavedWork = appointmentItems.length > 0 || Boolean(appointmentSlot) || Boolean(appointmentCustomerId);
+  const workingRulesDirty = WORKING_RULE_FIELDS.some((field) => workingRulesDraft[field] !== settings[field]);
+  const activeSettingsCategory = SETTINGS_NAVIGATION.find((category) => category.id === selectedSettingsCategory) ?? null;
+
+  function openCustomerContact(method, customer) {
+    if (!customer) return;
+    const phone = (customer.phone || "").replace(/\s+/g, "");
+    const email = customer.email || "";
+
+    if (method === "message") {
+      if (!phone) {
+        setAdminActionMessage("No phone number is saved for this client yet.");
+        return;
+      }
+      window.location.href = `sms:${phone}`;
+      return;
+    }
+
+    if (method === "email") {
+      if (!email) {
+        setAdminActionMessage("No email address is saved for this client yet.");
+        return;
+      }
+      window.location.href = `mailto:${email}`;
+      return;
+    }
+
+    if (!phone) {
+      setAdminActionMessage("No phone number is saved for this client yet.");
+      return;
+    }
+    window.location.href = `tel:${phone}`;
+  }
+
+  async function copyServiceBookingLink(service) {
+    const url = `${window.location.origin}${window.location.pathname}?service=${encodeURIComponent(service.id)}`;
+    setAdminActionMessage(`${service.name} booking link: ${url}`);
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setAdminActionMessage(`${service.name} booking link copied.`);
+    } catch (error) {
+      setAdminActionMessage(`${service.name} booking link ready to copy: ${url}`);
+    }
+  }
+
+  async function sendTelegramTestFromSettings() {
+    setTelegramTestStatus({ message: "Sending Telegram test message...", sending: true, type: "info" });
+
+    try {
+      await postTelegramTest();
+      setTelegramTestStatus({
+        message: "Telegram test sent. Check your Telegram chat.",
+        sending: false,
+        type: "success",
+      });
+    } catch (error) {
+      setTelegramTestStatus({
+        message: `Telegram test failed: ${telegramTestErrorMessage(error)}`,
+        sending: false,
+        type: "error",
+      });
+    }
+  }
+
+  useEffect(() => {
+    setWorkingRulesDraft({ ...settings });
+  }, [settings]);
+
+  useEffect(() => {
+    setCoverageZoneDraft({
+      preapproval: coverageZones.preapproval.join(", "),
+      usual: coverageZones.usual.join(", "),
+    });
+  }, [coverageZones]);
+
+  useEffect(() => {
+    if (personalEventOpen) return;
+    setPersonalEventStartDate(selectedDay.dateValue);
+    setPersonalEventEndDate(selectedDay.dateValue);
+  }, [personalEventOpen, selectedDay.dateValue]);
+
+  function updateWorkingRuleDraft(key, value) {
+    setWorkingRulesDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function saveWorkingRules() {
+    WORKING_RULE_FIELDS.forEach((field) => {
+      if (workingRulesDraft[field] !== settings[field]) {
+        onUpdateSetting(field, workingRulesDraft[field]);
+      }
+    });
+  }
+
+  function openSettingsSection(sectionId, returnCategory = null) {
+    setActiveTab("settings");
+    setSelectedSettingsCategory("current");
+    setSelectedSettingsSubsection(null);
+    setSettingsReturnCategory(returnCategory);
+    setSideMenuOpen(false);
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
+  function returnToSettingsCategory() {
+    setActiveTab("settings");
+    setSelectedSettingsCategory(settingsReturnCategory);
+    setSelectedSettingsSubsection(null);
+    setSettingsReturnCategory(null);
+  }
+
+  function openSettingsSubsection(section) {
+    const categoryId = activeSettingsCategory?.id;
+
+    if (categoryId === "scheduling") {
+      if (section === "Working Hours" || section === "Chain Mode / Availability Rules") {
+        openSettingsSection("admin-working-rules", categoryId);
+        return;
+      }
+      if (section === "Travel Buffer") {
+        setSettingsReturnCategory(categoryId);
+        setActiveTab("services");
+        return;
+      }
+    }
+
+    if (categoryId === "coverage" && section === "Service Areas") {
+      openSettingsSection("admin-service-areas", categoryId);
+      return;
+    }
+
+    if (categoryId === "services") {
+      if (section === "Enhancements") {
+        openSettingsSection("admin-enhancements", categoryId);
+        return;
+      }
+      setSettingsReturnCategory(categoryId);
+      setActiveTab("services");
+      return;
+    }
+
+    if (categoryId === "waitlist" && (section === "Client Requests" || section === "Offer Settings")) {
+      setSettingsReturnCategory(categoryId);
+      setActiveTab("waitlist");
+      return;
+    }
+
+    if (categoryId === "financial") {
+      setSettingsReturnCategory(categoryId);
+      setActiveTab("analytics");
+      return;
+    }
+
+    setSettingsReturnCategory(null);
+    setSelectedSettingsSubsection(section);
+  }
+
+  function renderSettingsSubsectionContent() {
+    if (activeSettingsCategory?.id === "coverage") {
+      if (selectedSettingsSubsection === "Coverage Rules") {
+        const activeAreas = serviceAreas.filter((area) => area.active !== false);
+        return (
+          <div className="settings-placeholder">
+            <h3>Coverage Rules</h3>
+            <p>Only active named service areas are shown to clients during booking.</p>
+            <p>
+              {activeAreas.length > 0
+                ? `Currently available: ${activeAreas.map((area) => area.name).join(", ")}.`
+                : "No service areas are currently available to clients."}
+            </p>
+            <button type="button" className="admin-secondary-action" onClick={() => openSettingsSection("admin-service-areas", "coverage")}>
+              Manage service areas
+            </button>
+          </div>
+        );
+      }
+
+      if (selectedSettingsSubsection === "Travel Charges") {
+        return (
+          <div className="settings-placeholder">
+            <h3>Travel Charges</h3>
+            <p>Travel surcharges are configured manually for each named service area.</p>
+            <button type="button" className="admin-secondary-action" onClick={() => openSettingsSection("admin-service-areas", "coverage")}>
+              Manage area fees
+            </button>
+          </div>
+        );
+      }
+
+      if (selectedSettingsSubsection === "Congestion Zone Fee") {
+        return (
+          <div className="settings-placeholder">
+            <h3>Congestion Zone Fee</h3>
+            <p>Congestion fees are configured manually per service area.</p>
+            <button type="button" className="admin-secondary-action" onClick={() => openSettingsSection("admin-service-areas", "coverage")}>
+              Manage area fees
+            </button>
+          </div>
+        );
+      }
+    }
+
+    if (activeSettingsCategory?.id === "waitlist" && selectedSettingsSubsection === "Waitlist Rules") {
+      return (
+        <div className="settings-placeholder">
+          <h3>Waitlist Rules</h3>
+          <p>Existing requests match by date, treatment duration, preferred time or window, and the client&apos;s flexibility.</p>
+          <p>Past requests close automatically. Offers remain a manual admin action in the Waitlist view.</p>
+          <p>Offer expiry is not implemented yet.</p>
+          <button
+            type="button"
+            className="admin-secondary-action"
+            onClick={() => {
+              setSettingsReturnCategory("waitlist");
+              setActiveTab("waitlist");
+            }}
+          >
+            Open waitlist requests
+          </button>
+        </div>
+      );
+    }
+
+    if (activeSettingsCategory?.id === "documents") {
+      return (
+        <div className="settings-placeholder">
+          <h3>{selectedSettingsSubsection}</h3>
+          <p>Not implemented yet.</p>
+          <p>
+            No editable receipt, invoice, business-details, email-template, or cancellation-text setting exists in the current admin state.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="settings-placeholder">
+        <h3>{selectedSettingsSubsection}</h3>
+        <p>Not implemented yet.</p>
+      </div>
+    );
+  }
+
+  function openAppointmentWizard() {
+    setAppointmentServiceMinutes({});
+    setActiveAppointmentServiceId(null);
+    setAppointmentStep("services");
+    setAppointmentDayIndex(selectedDayIndex);
+    setAppointmentSlot(null);
+    setAppointmentCustomerId("");
+    setAppointmentCustomerSearch("");
+    setAppointmentAddCustomerOpen(false);
+    setAppointmentNewCustomer({ address: "", email: "", name: "", phone: "" });
+    setAppointmentWizardOpen(true);
+  }
+
+  function openPersonalEventModal() {
+    setPersonalEventTitle("Personal event");
+    setPersonalEventStartDate(selectedDay.dateValue);
+    setPersonalEventEndDate(selectedDay.dateValue);
+    setPersonalEventStartTime("15:00");
+    setPersonalEventEndTime("20:00");
+    setPersonalEventError("");
+    setPersonalEventOpen(true);
+  }
+
+  function closeAppointmentWizard() {
+    setAppointmentWizardOpen(false);
+    setAppointmentLeavePromptOpen(false);
+    setAppointmentAddCustomerOpen(false);
+  }
+
+  function updateAppointmentNewCustomer(field, value) {
+    setAppointmentNewCustomer((current) => ({ ...current, [field]: value }));
+  }
+
+  function saveAppointmentNewCustomer(event) {
+    event.preventDefault();
+    const name = appointmentNewCustomer.name.trim();
+    if (!name) return;
+
+    const baseId = name
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "new-customer";
+    const existingIds = new Set(allCustomers.map((customer) => customer.id));
+    let id = baseId;
+    let suffix = 2;
+    while (existingIds.has(id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    const customer = {
+      address: appointmentNewCustomer.address.trim() || "Address not captured yet",
+      appointments: [],
+      email: appointmentNewCustomer.email.trim(),
+      id,
+      name,
+      notes: "Added during appointment creation.",
+      phone: appointmentNewCustomer.phone.trim(),
+      updates: "New client profile.",
+    };
+
+    setCustomAppointmentCustomers((current) => [customer, ...current]);
+    setAppointmentCustomerId(id);
+    setAppointmentCustomerSearch("");
+    setAppointmentNewCustomer({ address: "", email: "", name: "", phone: "" });
+    setAppointmentAddCustomerOpen(false);
+  }
+
+  function requestCloseAppointmentWizard() {
+    if (appointmentHasUnsavedWork) {
+      setAppointmentLeavePromptOpen(true);
+      return;
+    }
+
+    closeAppointmentWizard();
+  }
+
+  async function saveAndCloseAppointmentWizard() {
+    if (!appointmentCanCreate) return;
+    await createAppointmentFromWizard();
+  }
+
+  function changeAppointmentServiceMinutes(serviceId, minutesToAdd) {
+    setAppointmentServiceMinutes((current) => {
+      const currentMinutes = Number(current[serviceId]) || 0;
+      const nextMinutes = Math.max(0, currentMinutes + minutesToAdd);
+      const next = { ...current, [serviceId]: nextMinutes };
+      if (nextMinutes === 0) delete next[serviceId];
+      return next;
+    });
+    setAppointmentSlot(null);
+  }
+
+  function removeAppointmentService(serviceId) {
+    setAppointmentServiceMinutes((current) => {
+      const next = { ...current };
+      delete next[serviceId];
+      return next;
+    });
+    setAppointmentSlot(null);
+  }
+
+  async function createAppointmentFromWizard() {
+    if (!appointmentCanCreate) return;
+
+    try {
+      await onCreateAppointment({
+        address: appointmentCustomer.address,
+        clientName: appointmentCustomer.name,
+        customerEmail: appointmentCustomer.email,
+        customerPhone: appointmentCustomer.phone,
+        dayIndex: appointmentDayIndex,
+        duration: appointmentDuration,
+        items: appointmentItems.map((item) => ({
+          minutes: item.minutes,
+          name: item.name,
+          price: item.linePrice,
+        })),
+        location: appointmentCustomer.address,
+        serviceId: appointmentItems[0].id,
+        start: appointmentSlot.start,
+        travelBuffer: appointmentTravelBuffer,
+      });
+      setAppointmentWizardOpen(false);
+      setAppointmentLeavePromptOpen(false);
+      setActiveTab("calendar");
+    } catch (error) {
+      window.alert(error.message);
+    }
+  }
+
+  async function createPersonalEventFromModal(event) {
+    event.preventDefault();
+    setPersonalEventError("");
+
+    const startMinutes = timeToMinutes(personalEventStartTime);
+    const endMinutes = timeToMinutes(personalEventEndTime);
+    const matchingDays = days.filter((day) => day.dateValue >= personalEventStartDate && day.dateValue <= personalEventEndDate);
+
+    if (!personalEventTitle.trim()) {
+      setPersonalEventError("Add a short title for the personal event.");
+      return;
+    }
+
+    if (!matchingDays.length) {
+      setPersonalEventError("Choose dates inside the visible schedule week.");
+      return;
+    }
+
+    if (personalEventEndDate < personalEventStartDate) {
+      setPersonalEventError("End date must be the same day or after the start date.");
+      return;
+    }
+
+    if (personalEventStartDate === personalEventEndDate && endMinutes <= startMinutes) {
+      setPersonalEventError("End time must be after start time for a same-day event.");
+      return;
+    }
+
+    const personalEvents = matchingDays
+      .map((day) => {
+        const dayStart = day.dateValue === personalEventStartDate ? startMinutes : 0;
+        const dayEnd = day.dateValue === personalEventEndDate ? endMinutes : 1440;
+        const duration = dayEnd - dayStart;
+        if (duration <= 0) return null;
+
+        return {
+          clientName: personalEventTitle.trim(),
+          dayIndex: days.findIndex((item) => item.id === day.id),
+          duration,
+          items: [{ minutes: duration, name: "Personal event", price: 0 }],
+          kind: "personal",
+          serviceId: "personal-event",
+          start: dayStart,
+          travelBuffer: 0,
+        };
+      })
+      .filter(Boolean);
+
+    if (!personalEvents.length) {
+      setPersonalEventError("Choose a time range that creates at least one calendar block.");
+      return;
+    }
+
+    const overlap = personalEvents.find((eventBlock) => {
+      const day = days[eventBlock.dayIndex];
+      const eventStart = Number(eventBlock.start);
+      const eventEnd = eventStart + Number(eventBlock.duration);
+      return getBookingBlocks(day.bookings).some((booking) =>
+        rangesOverlap(eventStart, eventEnd, booking.start, booking.bufferEnd)
+      );
+    });
+
+    if (overlap) {
+      const approved = window.confirm(
+        "This personal event overlaps an existing booking or event. Do you want to create it anyway?"
+      );
+
+      if (!approved) {
+        setPersonalEventError("Personal event was not created because it overlaps an existing booking or event.");
+        return;
+      }
+    }
+
+    try {
+      await onCreatePersonalEvent(personalEvents);
+      setPersonalEventOpen(false);
+      setActiveTab("calendar");
+      const firstDayIndex = personalEvents[0]?.dayIndex;
+      if (Number.isFinite(firstDayIndex)) onSetSelectedDayIndex(firstDayIndex);
+    } catch (error) {
+      setPersonalEventError(error.message || "Could not create personal event.");
+    }
+  }
+
+  function updateServiceDetail(serviceId, key, value) {
+    const numericKeys = new Set(["buffer", "duration", "price"]);
+    onServiceDetailChange(serviceId, {
+      [key]: numericKeys.has(key) ? Math.max(0, Number(value) || 0) : value,
+    });
+  }
+
+  async function updateOverviewBooking(patch) {
+    if (!overviewBooking) return;
+    const nextPatch = { ...patch };
+    if ("start" in nextPatch && typeof nextPatch.start === "string") {
+      nextPatch.start = timeToMinutes(nextPatch.start);
+    }
+    if ("travelBuffer" in nextPatch) {
+      nextPatch.travelBuffer = Math.max(0, Number(nextPatch.travelBuffer) || 0);
+    }
+
+    try {
+      const normalizedPatch = normalizeAdminBookingApprovalPatch(nextPatch, overviewBooking);
+      const updatedBooking = await onUpdateBooking(overviewBooking.id, normalizedPatch);
+      setOverviewBooking((current) => current ? { ...current, ...(updatedBooking ?? normalizedPatch) } : current);
+    } catch (error) {
+      window.alert(error.message);
+    }
+  }
+
+  function shareOverviewBooking() {
+    if (!overviewBooking) return;
+    const details = [
+      `Client: ${clientNameForBooking(overviewBooking)}`,
+      `Time: ${formatRange(overviewBooking.start, overviewBooking.sessionEnd)}`,
+      `Buffer: ${overviewBooking.travelBuffer} minutes`,
+      `Location: ${overviewBooking.address || overviewBooking.location || "Not captured"}`,
+      `Services: ${itemsForBooking(overviewBooking).map((item) => item.name).join(", ")}`,
+    ].join("\n");
+
+    if (navigator.share) {
+      navigator.share({ text: details, title: "Appointment details" }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(details).catch(() => {});
+    }
+    setOverviewMoreOpen(false);
+  }
+
+  function renderBookingBox(booking, compact = false) {
+    const personal = isPersonalEvent(booking);
+    const items = itemsForBooking(booking);
+    const mapDisabled = !booking.address && !booking.location;
+
+    return (
+      <article className={[compact ? "admin-booking-box compact-admin-booking-box" : "admin-booking-box", personal ? "personal-admin-booking-box" : ""].filter(Boolean).join(" ")} key={booking.id}>
+        <button
+          type="button"
+          className="booking-delete-corner"
+          aria-label="Delete booking"
+          onClick={async () => {
+            try {
+              await onDeleteBooking(booking.id);
+            } catch (error) {
+              window.alert(error.message);
+            }
+          }}
+        >
+          <span aria-hidden="true">X</span>
+        </button>
+        <div className="admin-booking-title-row">
+          <strong>{clientNameForBooking(booking)}</strong>
+          <span>{booking.duration} min</span>
+        </div>
+        <div className="admin-booking-meta">
+          <span>{formatRange(booking.start, booking.sessionEnd)}</span>
+          <span>{personal ? "Personal" : `Buffer ${booking.travelBuffer} min`}</span>
+        </div>
+        {booking.orderId && (
+          <small className="admin-order-note">Part of Order #{booking.orderId.slice(0, 8)}</small>
+        )}
+        {!compact && (
+          <div className="admin-booking-services">
+            {items.map((item, index) => (
+              <span key={`${booking.id}-${item.name}-${index}`}>{item.name}{item.minutes ? ` / ${item.minutes} min` : ""}</span>
+            ))}
+          </div>
+        )}
+        <div className="admin-booking-actions">
+          {!personal && (
+            <a
+              aria-disabled={mapDisabled}
+              className={mapDisabled ? "disabled-map-link" : ""}
+              href={mapDisabled ? undefined : mapUrlForBooking(booking)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Navigate
+            </a>
+          )}
+          <button type="button" onClick={() => { setOverviewBooking(booking); setOverviewEditing(false); setOverviewMoreOpen(false); setOverviewTab("details"); }}>Overview</button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderTimelineBookingBox(booking) {
+    const personal = isPersonalEvent(booking);
+    const items = itemsForBooking(booking);
+    const mapDisabled = !booking.address && !booking.location;
+    const serviceCodes = items
+      .map((item) => `${item.minutes || booking.duration} ${serviceAbbreviation(item.name)}`)
+      .join(" + ");
+    const totalReserved = Math.max(1, booking.duration + booking.travelBuffer);
+    let bandOffset = 0;
+    const serviceBands = items.map((item, index) => {
+      const minutes = Math.max(0, Number(item.minutes || booking.duration));
+      const height = Math.min(100, (minutes / totalReserved) * 100);
+      const band = {
+        className: `day-timeline-service-band service-band-${index % 5}`,
+        height,
+        offset: bandOffset,
+      };
+      bandOffset += height;
+      return band;
+    });
+    const bufferPercent = Math.min(100, Math.max(0, (booking.travelBuffer / totalReserved) * 100));
+
+    return (
+      <article
+        className={personal ? "day-timeline-booking-box personal-timeline-booking-box" : "day-timeline-booking-box"}
+        key={booking.id}
+        style={{ "--buffer-percent": `${bufferPercent}%` }}
+      >
+        {serviceBands.map((band, index) => (
+          <span
+            aria-hidden="true"
+            className={band.className}
+            key={`${booking.id}-service-band-${index}`}
+            style={{ height: `${band.height}%`, top: `${band.offset}%` }}
+          />
+        ))}
+        <span className="day-timeline-buffer-band" aria-hidden="true" />
+        <button
+          type="button"
+          className="booking-delete-corner"
+          aria-label="Delete booking"
+          onClick={async () => {
+            try {
+              await onDeleteBooking(booking.id);
+            } catch (error) {
+              window.alert(error.message);
+            }
+          }}
+        >
+          <span aria-hidden="true">X</span>
+        </button>
+        <div className="day-timeline-booking-main">
+          <strong>{formatRange(booking.start, booking.bufferEnd)}</strong>
+          <span>{personal ? "Personal event" : serviceCodes}</span>
+        </div>
+        <small>
+          <span className="timeline-client-name">{clientNameForBooking(booking)}</span>
+          {personal ? " / unavailable" : ` / buffer ${booking.travelBuffer} min`}
+        </small>
+        <div className="admin-booking-actions">
+          {!personal && (
+            <a
+              aria-disabled={mapDisabled}
+              className={mapDisabled ? "disabled-map-link" : ""}
+              href={mapDisabled ? undefined : mapUrlForBooking(booking)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Navigate
+            </a>
+          )}
+          <button type="button" onClick={() => { setOverviewBooking(booking); setOverviewEditing(false); setOverviewMoreOpen(false); setOverviewTab("details"); }}>Overview</button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderAgendaView() {
+    return (
+      <div className="admin-agenda-list">
+        {days.map((day) => {
+          const blocks = getBookingBlocks(day.bookings);
+
+          return (
+            <section className="admin-agenda-day" key={day.id}>
+              <h3>{fullDateLabel(day.dateValue)}</h3>
+              {blocks.length === 0 ? (
+                <p>No appointments scheduled.</p>
+              ) : (
+                blocks.map((booking) => renderBookingBox({ ...booking, dayId: day.id, dayIndex: days.findIndex((item) => item.id === day.id), dateValue: day.dateValue }))
+              )}
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderTimeGrid(dayList) {
+    const compact = dayList.length > 1;
+    const firstBookingStart = Math.min(
+      ...dayList.flatMap((day) => getBookingBlocks(day.bookings).map((booking) => booking.start))
+    );
+    const fallbackStart = Math.min(
+      ...dayList.map((day) => timeToMinutes(day.settings?.workingStart ?? DEFAULT_DAY_SETTINGS.workingStart))
+    );
+    const startHour = Number.isFinite(firstBookingStart)
+      ? Math.max(0, Math.floor(firstBookingStart / 60))
+      : Math.max(0, Math.floor(fallbackStart / 60));
+    const hours = Array.from({ length: 24 - startHour }, (_, index) => startHour + index);
+    const rangeStart = startHour * 60;
+    const rangeEnd = 1440;
+    const rangeMinutes = rangeEnd - rangeStart;
+    const gridHeight = hours.length * 72;
+
+    return (
+      <div className={dayList.length === 1 ? "admin-day-grid" : "admin-three-day-grid"}>
+        <div className="admin-grid-times" style={{ gridTemplateRows: `repeat(${hours.length}, 72px)` }}>
+          {hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}
+        </div>
+        {dayList.map((day) => (
+          <div className="admin-grid-day" key={day.id}>
+            <h3>{fullDateLabel(day.dateValue)}</h3>
+            <div className="admin-grid-column" style={{ minHeight: `${gridHeight}px` }}>
+              {hours.map((hour) => <span className="grid-hour-line" key={hour} />)}
+              {getBookingBlocks(day.bookings).map((booking) => {
+                const top = (Math.max(rangeStart, booking.start) - rangeStart) / rangeMinutes * 100;
+                const height = ((booking.bufferEnd - booking.start) / rangeMinutes) * 100;
+
+                return (
+                  <div
+                    className={compact ? "admin-grid-event" : "admin-grid-event full-admin-grid-event"}
+                    key={booking.id}
+                    style={{ height: `${height}%`, top: `${top}%` }}
+                  >
+                    {compact
+                      ? renderBookingBox({ ...booking, dayId: day.id, dayIndex: days.findIndex((item) => item.id === day.id), dateValue: day.dateValue }, true)
+                      : renderTimelineBookingBox({ ...booking, dayId: day.id, dayIndex: days.findIndex((item) => item.id === day.id), dateValue: day.dateValue })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderCalendarContent() {
+    if (calendarMode === "day") return renderTimeGrid([selectedDay]);
+    if (calendarMode === "three-day") return renderTimeGrid(days.slice(selectedDayIndex, selectedDayIndex + 3));
+    return renderAgendaView();
+  }
+
+  return (
+    <section className="admin-app-shell">
+      <header className="admin-topbar">
+        <button type="button" className="admin-menu-button" onClick={() => setSideMenuOpen(true)} aria-label="Open menu">
+          <span />
+          <span />
+          <span />
+        </button>
+        <div>
+          <p>Vad Massage</p>
+          <h1>{ADMIN_TABS.find((tab) => tab.id === activeTab)?.label}</h1>
+        </div>
+        <div className="top-action-cluster">
+          <button type="button" className="admin-client-link square-green-action" onClick={() => onSetActiveView("client")}>Client</button>
+        </div>
+      </header>
+
+      <div className="admin-date-strip" aria-label="Choose date">
+        {days.map((day, index) => (
+          <button
+            type="button"
+            className={[
+              "admin-date-pill",
+              index === selectedDayIndex ? "active-admin-date" : "",
+              day.dateValue === currentDateValue ? "today-admin-date" : "",
+            ].filter(Boolean).join(" ")}
+            key={day.id}
+            onClick={() => onSetSelectedDayIndex(index)}
+          >
+            <span>{day.label}</span>
+            <strong>{compactDate(day.dateValue)}</strong>
+          </button>
+        ))}
+      </div>
+
+      {sideMenuOpen && (
+        <div className="admin-menu-backdrop" role="presentation" onClick={() => setSideMenuOpen(false)}>
+          <aside className="admin-side-menu" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-menu-heading">
+              <h2>Menu</h2>
+              <button type="button" onClick={() => setSideMenuOpen(false)}>Close</button>
+            </div>
+            <section>
+              <h3>View Mode</h3>
+              {[
+                ["agenda", "Agenda View"],
+                ["day", "Day View"],
+                ["three-day", "3-Day View"],
+              ].map(([id, label]) => (
+                <button
+                  type="button"
+                  className={calendarMode === id ? "admin-menu-row active-menu-row" : "admin-menu-row"}
+                  key={id}
+                  onClick={() => {
+                    setCalendarMode(id);
+                    setActiveTab("calendar");
+                    setSideMenuOpen(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </section>
+            <section>
+              <h3>My Calendars</h3>
+              <label className="admin-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={calendarConnections.google}
+                  onChange={(event) => setCalendarConnections((current) => ({ ...current, google: event.target.checked }))}
+                />
+                <span>Google Calendar</span>
+              </label>
+              <label className="admin-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={calendarConnections.microsoft}
+                  onChange={(event) => setCalendarConnections((current) => ({ ...current, microsoft: event.target.checked }))}
+                />
+                <span>Microsoft Calendar</span>
+              </label>
+            </section>
+            <section>
+              <h3>Services</h3>
+              <button type="button" className="admin-menu-row" onClick={() => { setActiveTab("services"); setSideMenuOpen(false); }}>
+                Service list and booking links
+              </button>
+            </section>
+            <section>
+              <h3>Business</h3>
+              <button type="button" className="admin-menu-row" onClick={() => { setActiveTab("analytics"); setSideMenuOpen(false); }}>
+                Business Analytics
+              </button>
+            </section>
+            <section>
+              <h3>Settings</h3>
+              <button type="button" className="admin-menu-row" onClick={() => openSettingsSection("admin-working-rules")}>
+                Working rules
+              </button>
+              <button type="button" className="admin-menu-row" onClick={() => openSettingsSection("admin-service-areas")}>
+                Service areas
+              </button>
+            </section>
+          </aside>
+        </div>
+      )}
+
+      <main className="admin-main-surface">
+        {adminActionMessage && (
+          <p className="admin-action-message" role="status">
+            {adminActionMessage}
+          </p>
+        )}
+        {activeTab === "calendar" && (
+          <section className="admin-screen">
+            <div className="admin-screen-heading">
+              <div>
+                <p>{calendarMode === "agenda" ? "Agenda View" : calendarMode === "day" ? "Day View" : "3-Day View"}</p>
+                <h2>Schedule density</h2>
+              </div>
+              <div className="admin-heading-actions">
+                <button type="button" onClick={openPersonalEventModal}>Add personal event</button>
+                <button type="button" onClick={openAppointmentWizard}>Add appointment</button>
+              </div>
+            </div>
+            {renderCalendarContent()}
+          </section>
+        )}
+
+        {activeTab === "customers" && (
+          <section className="admin-screen">
+            <div className="admin-screen-heading">
+              <div>
+                <p>Customer Directory</p>
+                <h2>Customers</h2>
+              </div>
+            </div>
+            <input
+              className="admin-search"
+              type="search"
+              placeholder="Search customers"
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
+            />
+            <div className="customer-directory-layout">
+              <div className="customer-list">
+                {filteredCustomers.map((customer) => (
+                  <button
+                    type="button"
+                    className={customer.id === selectedCustomer?.id ? "customer-row active-customer-row" : "customer-row"}
+                    key={customer.id}
+                    onClick={() => setSelectedCustomerId(customer.id)}
+                  >
+                    <strong>{customer.name}</strong>
+                    <span>{customer.appointments.length} appointments</span>
+                  </button>
+                ))}
+              </div>
+              {selectedCustomer && (
+                <article className="customer-profile">
+                  <h3>{selectedCustomer.name}</h3>
+                  <div className="quick-action-row">
+                    <button type="button" aria-label="Message customer" onClick={() => openCustomerContact("message", selectedCustomer)}>Msg</button>
+                    <button type="button" aria-label="Email customer" onClick={() => openCustomerContact("email", selectedCustomer)}>Email</button>
+                    <button type="button" aria-label="Call customer" onClick={() => openCustomerContact("call", selectedCustomer)}>Call</button>
+                  </div>
+                  <details open>
+                    <summary>Address</summary>
+                    <p>{selectedCustomer.address}</p>
+                  </details>
+                  <details>
+                    <summary>Notes</summary>
+                    <p>{selectedCustomer.notes}</p>
+                  </details>
+                  <details>
+                    <summary>Appointments</summary>
+                    {selectedCustomer.appointments.length === 0 ? <p>No appointment history yet.</p> : selectedCustomer.appointments.map((appointment) => (
+                      <p key={`${appointment.date}-${appointment.time}`}>{fullDateLabel(appointment.date)} / {appointment.time} / {appointment.serviceName}</p>
+                    ))}
+                  </details>
+                  <details>
+                    <summary>Updates</summary>
+                    <p>{selectedCustomer.updates}</p>
+                  </details>
+                </article>
+              )}
+            </div>
+          </section>
+        )}
+
+        {activeTab === "waitlist" && (
+          <section className="admin-screen">
+            {settingsReturnCategory && (
+              <button type="button" className="settings-folder-back" onClick={returnToSettingsCategory}>
+                <span aria-hidden="true">&lt;</span>
+                Back to Settings
+              </button>
+            )}
+            <WaitlistPanel
+              waitlistEntries={waitlistEntries}
+              days={days}
+              services={services}
+              displayDayName={displayDayName}
+              getEffectiveWaitlistStatus={getEffectiveWaitlistStatus}
+              slotMatchesWaitlistRequest={slotMatchesWaitlistRequest}
+              onSendOffer={onSendWaitlistOffer}
+              onCloseRequest={onCloseWaitlistRequest}
+            />
+          </section>
+        )}
+
+        {activeTab === "analytics" && (
+          <>
+            {settingsReturnCategory && (
+              <button type="button" className="settings-folder-back" onClick={returnToSettingsCategory}>
+                <span aria-hidden="true">&lt;</span>
+                Back to Settings
+              </button>
+            )}
+            <BusinessAnalyticsDashboard
+              days={days}
+              services={services}
+              settings={settings}
+            />
+          </>
+        )}
+
+        {activeTab === "settings" && (
+          <section className="admin-screen settings-folder-shell">
+            {selectedSettingsSubsection ? (
+              <>
+                <div className="settings-folder-header">
+                  <button type="button" className="settings-folder-back" onClick={() => setSelectedSettingsSubsection(null)}>
+                    <span aria-hidden="true">&lt;</span>
+                    Back
+                  </button>
+                  <div>
+                    <p>{activeSettingsCategory?.label ?? "Settings"}</p>
+                    <h2>{selectedSettingsSubsection}</h2>
+                  </div>
+                </div>
+                {renderSettingsSubsectionContent()}
+              </>
+            ) : selectedSettingsCategory === "current" ? (
+              <div className="settings-current-content">
+                <div className="settings-folder-header">
+                  <button
+                    type="button"
+                    className="settings-folder-back"
+                    onClick={() => {
+                      if (settingsReturnCategory) {
+                        returnToSettingsCategory();
+                        return;
+                      }
+                      setSelectedSettingsCategory(null);
+                    }}
+                  >
+                    <span aria-hidden="true">&lt;</span>
+                    Back
+                  </button>
+                  <div>
+                    <p>Settings</p>
+                    <h2>Current settings</h2>
+                  </div>
+                </div>
+            <div className="admin-screen-heading" id="admin-working-rules">
+              <div>
+                <p>Settings</p>
+                <h2>Working rules</h2>
+              </div>
+              <button type="button" onClick={onResetStoredData}>Reset stored data</button>
+            </div>
+            <div className="working-rules-grid">
+              <label>Working start<input type="time" value={workingRulesDraft.workingStart} onChange={(event) => updateWorkingRuleDraft("workingStart", event.target.value)} /></label>
+              <label>Working end<input type="time" value={workingRulesDraft.workingEnd} onChange={(event) => updateWorkingRuleDraft("workingEnd", event.target.value)} /></label>
+              <label>Day Mode<select value={workingRulesDraft.mode} onChange={(event) => updateWorkingRuleDraft("mode", event.target.value)}><option value="flexible">Flexible Mode</option><option value="optimized">Optimized Mode</option></select></label>
+              <label>Start of Day<select value={workingRulesDraft.startMode} onChange={(event) => updateWorkingRuleDraft("startMode", event.target.value)}><option value="flexible">Flexible Start</option><option value="fixed">Fixed Start</option></select></label>
+              <label>Fixed Start<input type="time" value={workingRulesDraft.fixedStart} onChange={(event) => updateWorkingRuleDraft("fixedStart", event.target.value)} /></label>
+              <label>Release time<input type="time" value={workingRulesDraft.releaseTime} disabled={!workingRulesDraft.anchorReleaseEnabled} onChange={(event) => updateWorkingRuleDraft("releaseTime", event.target.value)} /></label>
+              <label className="admin-toggle-row"><input type="checkbox" checked={Boolean(workingRulesDraft.anchorReleaseEnabled)} onChange={(event) => updateWorkingRuleDraft("anchorReleaseEnabled", event.target.checked)} /><span>Anchor release enabled</span></label>
+            </div>
+            <div className="working-rules-actions">
+              <button type="button" className="admin-primary-action" disabled={!workingRulesDirty} onClick={saveWorkingRules}>Save</button>
+              <button type="button" className="admin-secondary-action" onClick={onResetCurrentDay}>Reset current day</button>
+              <span>{workingRulesDirty ? "Unsaved changes" : "All changes saved"}</span>
+            </div>
+            <div className="admin-settings-section" id="admin-enhancements">
+              <div className="admin-screen-heading compact-settings-heading">
+                <div>
+                  <p>Add-ons</p>
+                  <h2>Enhancements</h2>
+                </div>
+                <button type="button" onClick={onAddEnhancement}>Add enhancement</button>
+              </div>
+              <div className="admin-enhancement-list">
+                {enhancements.map((item) => (
+                  <article className="admin-enhancement-card" key={item.id}>
+                    <label>
+                      <span>Name</span>
+                      <input value={item.name} onChange={(event) => onUpdateEnhancement(item.id, { name: event.target.value })} />
+                    </label>
+                    <label>
+                      <span>Price</span>
+                      <input type="number" min="0" value={item.price} onChange={(event) => onUpdateEnhancement(item.id, { price: event.target.value })} />
+                    </label>
+                    <label>
+                      <span>Extra time</span>
+                      <input type="number" min="0" step="5" value={item.durationMinutes ?? 0} onChange={(event) => onUpdateEnhancement(item.id, { durationMinutes: event.target.value })} />
+                    </label>
+                    <label className="admin-enhancement-description">
+                      <span>Description</span>
+                      <input value={item.description} onChange={(event) => onUpdateEnhancement(item.id, { description: event.target.value })} />
+                    </label>
+                    <label className="admin-toggle-row admin-enhancement-active">
+                      <input type="checkbox" checked={item.active !== false} onChange={(event) => onUpdateEnhancement(item.id, { active: event.target.checked })} />
+                      <span>{item.active !== false ? "Active" : "Hidden"}</span>
+                    </label>
+                    <button type="button" className="admin-danger-option" onClick={() => onDeleteEnhancement(item.id)}>Delete</button>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="admin-settings-section service-area-settings-section" id="admin-service-areas">
+              <div className="admin-screen-heading compact-settings-heading">
+                <div>
+                  <p>Client booking</p>
+                  <h2>Service areas</h2>
+                </div>
+                <button type="button" onClick={onAddServiceArea}>Add area</button>
+              </div>
+              <p className="admin-muted-note">
+                Turn areas on or off and set optional manual fees. Active areas appear on the first booking step.
+              </p>
+              <div className="admin-service-area-grid">
+                {serviceAreas.map((area) => (
+                  <article className={area.active !== false ? "admin-service-area-card active-admin-service-area" : "admin-service-area-card"} key={area.id}>
+                    <label className="admin-service-area-toggle">
+                      <input
+                        type="checkbox"
+                        checked={area.active !== false}
+                        onChange={(event) => onUpdateServiceArea(area.id, { active: event.target.checked })}
+                      />
+                      <span>{area.active !== false ? "Visible to clients" : "Hidden"}</span>
+                    </label>
+                    <label className="admin-service-area-name">
+                      <span>Name</span>
+                      <input value={area.name} onChange={(event) => onUpdateServiceArea(area.id, { name: event.target.value })} />
+                    </label>
+                    <div className="admin-service-area-fees">
+                      <label>
+                        <span>Congestion fee (£)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={area.congestionFee ?? 0}
+                          onChange={(event) => onUpdateServiceArea(area.id, { congestionFee: Math.max(0, Number(event.target.value) || 0) })}
+                        />
+                      </label>
+                      <label>
+                        <span>Travel surcharge (£)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={area.travelSurcharge ?? 0}
+                          onChange={(event) => onUpdateServiceArea(area.id, { travelSurcharge: Math.max(0, Number(event.target.value) || 0) })}
+                        />
+                      </label>
+                    </div>
+                    {area.custom && (
+                      <button type="button" className="admin-danger-option service-area-delete-button" onClick={() => onDeleteServiceArea(area.id)}>
+                        Delete
+                      </button>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="admin-settings-section telegram-settings-section" id="admin-telegram-settings">
+              <div className="admin-screen-heading compact-settings-heading">
+                <div>
+                  <p>Client updates</p>
+                  <h2>Telegram notifications</h2>
+                </div>
+                <button
+                  type="button"
+                  className="admin-primary-action"
+                  disabled={telegramTestStatus.sending}
+                  onClick={sendTelegramTestFromSettings}
+                >
+                  {telegramTestStatus.sending ? "Sending..." : "Send test"}
+                </button>
+              </div>
+              <p className="admin-muted-note">
+                Send a private test message to the Telegram chat saved in Vercel. The client must start the bot before it can message them.
+              </p>
+              {telegramTestStatus.message && (
+                <p className={`telegram-test-status ${telegramTestStatus.type || "info"}`} role="status">
+                  {telegramTestStatus.message}
+                </p>
+              )}
+            </div>
+              </div>
+            ) : activeSettingsCategory ? (
+              <>
+                <div className="settings-folder-header">
+                  <button type="button" className="settings-folder-back" onClick={() => setSelectedSettingsCategory(null)}>
+                    <span aria-hidden="true">&lt;</span>
+                    Back
+                  </button>
+                  <div>
+                    <p>Settings</p>
+                    <h2>{activeSettingsCategory.label}</h2>
+                  </div>
+                </div>
+                <div className="settings-folder-list">
+                  {activeSettingsCategory.sections.map((section) => (
+                    <button
+                      type="button"
+                      className="settings-folder-row"
+                      key={section}
+                      onClick={() => openSettingsSubsection(section)}
+                    >
+                      <span>{section}</span>
+                      <span aria-hidden="true">&gt;</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="admin-screen-heading settings-home-heading">
+                  <div>
+                    <p>Settings</p>
+                    <h2>Settings</h2>
+                  </div>
+                </div>
+                <div className="settings-folder-list">
+                  {SETTINGS_NAVIGATION.map((category) => (
+                    <button
+                      type="button"
+                      className="settings-folder-row"
+                      key={category.id}
+                      onClick={() => {
+                        setSettingsReturnCategory(null);
+                        setSelectedSettingsCategory(category.id);
+                        setSelectedSettingsSubsection(null);
+                      }}
+                    >
+                      <span>{category.label}</span>
+                      <span aria-hidden="true">&gt;</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="settings-folder-row settings-current-row"
+                    onClick={() => {
+                      setSettingsReturnCategory(null);
+                      setSelectedSettingsCategory("current");
+                      setSelectedSettingsSubsection(null);
+                    }}
+                  >
+                    <span>Current settings</span>
+                    <span aria-hidden="true">&gt;</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {activeTab === "services" && (
+          <section className="admin-screen">
+            <div className="admin-screen-heading">
+              <div>
+                <p>Services</p>
+                <h2>Service offerings</h2>
+              </div>
+              {settingsReturnCategory && (
+                <button type="button" className="settings-folder-back" onClick={returnToSettingsCategory}>
+                  <span aria-hidden="true">&lt;</span>
+                  Back to Settings
+                </button>
+              )}
+            </div>
+            <input
+              className="admin-search"
+              type="search"
+              placeholder="Search services"
+              value={serviceSearch}
+              onChange={(event) => setServiceSearch(event.target.value)}
+            />
+            <div className="admin-service-grid">
+              {filteredServices.map((service) => (
+                <article className="admin-service-card" key={service.id}>
+                  <span style={{ background: service.color }}>{service.visible ? "Active" : "Hidden"}</span>
+                  <h3>{service.name}</h3>
+                  <strong>{"\u00a3"}{service.price}</strong>
+                  <div className="admin-service-actions">
+                    <button type="button" onClick={() => copyServiceBookingLink(service)}>Copy Link</button>
+                    <button type="button" onClick={() => setEditingServiceId((current) => current === service.id ? null : service.id)}>
+                      {editingServiceId === service.id ? "Done" : "Edit"}
+                    </button>
+                    <label className="admin-toggle-row">
+                      <input type="checkbox" checked={service.visible} onChange={() => onServiceVisibilityChange(service.id)} />
+                      <span>Visible</span>
+                    </label>
+                  </div>
+                  {editingServiceId === service.id && (
+                    <div className="admin-service-editor">
+                      <label>
+                        Title
+                        <input
+                          type="text"
+                          value={service.name}
+                          onChange={(event) => onServiceNameChange(service.id, event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Short description
+                        <input
+                          type="text"
+                          value={service.shortDescription}
+                          onChange={(event) => updateServiceDetail(service.id, "shortDescription", event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Longer description
+                        <textarea
+                          value={service.longDescription}
+                          onChange={(event) => updateServiceDetail(service.id, "longDescription", event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Picture URL
+                        <input
+                          type="text"
+                          value={service.imageUrl}
+                          onChange={(event) => updateServiceDetail(service.id, "imageUrl", event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Duration
+                        <input
+                          min="0"
+                          step="15"
+                          type="number"
+                          value={service.duration}
+                          onChange={(event) => updateServiceDetail(service.id, "duration", event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Buffer
+                        <input
+                          min="0"
+                          step="15"
+                          type="number"
+                          value={service.buffer}
+                          onChange={(event) => updateServiceDetail(service.id, "buffer", event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Price
+                        <input
+                          min="0"
+                          step="1"
+                          type="number"
+                          value={service.price}
+                          onChange={(event) => updateServiceDetail(service.id, "price", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+      </main>
+
+      <button type="button" className="admin-fab" onClick={() => activeTab === "customers" ? setSelectedCustomerId(allCustomers[0]?.id ?? null) : openAppointmentWizard()}>+</button>
+
+      {personalEventOpen && (
+        <div className="admin-appointment-backdrop" role="presentation">
+          <section className="admin-appointment-modal personal-event-modal" role="dialog" aria-modal="true" aria-label="Add personal event">
+            <header className="admin-appointment-header">
+              <button type="button" aria-label="Close" onClick={() => setPersonalEventOpen(false)}>x</button>
+              <h2>Add personal event</h2>
+              <button type="submit" form="personal-event-form" className="appointment-create-button">Create</button>
+            </header>
+            <form id="personal-event-form" className="personal-event-form" onSubmit={createPersonalEventFromModal}>
+              <label>
+                <span>Title</span>
+                <input value={personalEventTitle} onChange={(event) => setPersonalEventTitle(event.target.value)} placeholder="Personal event" />
+              </label>
+              <div className="personal-event-grid">
+                <label>
+                  <span>From date</span>
+                  <input type="date" value={personalEventStartDate} min={days[0]?.dateValue} max={days[days.length - 1]?.dateValue} onChange={(event) => setPersonalEventStartDate(event.target.value)} />
+                </label>
+                <label>
+                  <span>From time</span>
+                  <input type="time" value={personalEventStartTime} onChange={(event) => setPersonalEventStartTime(event.target.value)} />
+                </label>
+                <label>
+                  <span>Until date</span>
+                  <input type="date" value={personalEventEndDate} min={days[0]?.dateValue} max={days[days.length - 1]?.dateValue} onChange={(event) => setPersonalEventEndDate(event.target.value)} />
+                </label>
+                <label>
+                  <span>Until time</span>
+                  <input type="time" value={personalEventEndTime} onChange={(event) => setPersonalEventEndTime(event.target.value)} />
+                </label>
+              </div>
+              <p className="personal-event-help">Personal events block availability in the calendar, but they do not appear as client bookings.</p>
+              {personalEventError && <p className="appointment-warning">{personalEventError}</p>}
+            </form>
+          </section>
+        </div>
+      )}
+
+      {appointmentWizardOpen && (
+        <div className="admin-appointment-backdrop" role="presentation">
+          <section className="admin-appointment-modal" role="dialog" aria-modal="true" aria-label="Create appointment">
+            <header className="admin-appointment-header">
+              <button
+                type="button"
+                aria-label={appointmentStep === "services" || appointmentStep === "review" ? "Close" : "Back"}
+                onClick={() => {
+                  if (appointmentStep === "services" || appointmentStep === "review") requestCloseAppointmentWizard();
+                  if (appointmentStep === "time") setAppointmentStep("services");
+                  if (appointmentStep === "client") setAppointmentStep("time");
+                }}
+              >
+                {appointmentStep === "services" || appointmentStep === "review" ? "x" : "<"}
+              </button>
+              <h2>
+                {appointmentStep === "services" && "Select service(s)"}
+                {appointmentStep === "time" && "Select date and time"}
+                {appointmentStep === "client" && "Select guest(s)"}
+                {appointmentStep === "review" && "Appointment"}
+              </h2>
+              {appointmentStep === "review" ? (
+                <button type="button" className="appointment-create-button" disabled={!appointmentCanCreate} onClick={createAppointmentFromWizard}>Create</button>
+              ) : (
+                <button
+                  type="button"
+                  className="appointment-next-button"
+                  disabled={
+                    (appointmentStep === "services" && (!isValidDuration(appointmentDuration) || appointmentItems.length === 0)) ||
+                    (appointmentStep === "time" && !appointmentSlot) ||
+                    (appointmentStep === "client" && !appointmentCustomer)
+                  }
+                  onClick={() => {
+                    if (appointmentStep === "services") setAppointmentStep("time");
+                    if (appointmentStep === "time") setAppointmentStep("client");
+                    if (appointmentStep === "client") setAppointmentStep("review");
+                  }}
+                >
+                  Next
+                </button>
+              )}
+            </header>
+
+            {appointmentStep === "services" && (
+              <div className="appointment-step appointment-service-step">
+                <div className="appointment-summary-strip">
+                  {appointmentItems.length === 0 ? (
+                    <span className="appointment-summary-empty">Selected services and total price here</span>
+                  ) : (
+                    <>
+                      <div className="appointment-summary-lines">
+                        {appointmentItems.map((item) => (
+                          <div className="appointment-summary-line" key={item.id}>
+                            <strong>{item.name}</strong>
+                            <span>{item.minutes} min</span>
+                            <b>{"\u00a3"}{item.linePrice}</b>
+                            <button type="button" aria-label={`Remove ${item.name}`} onClick={() => removeAppointmentService(item.id)}>x</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="appointment-summary-total">
+                        <span>{appointmentDuration} minutes</span>
+                        <strong>Total {"\u00a3"}{appointmentTotal}</strong>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {!isValidDuration(appointmentDuration) && appointmentItems.length > 0 && (
+                  <p className="appointment-warning">Total appointment time must be 60 minutes minimum, then 30-minute steps.</p>
+                )}
+                <div className="appointment-service-list">
+                  {serviceCards.filter((service) => service.visible).map((service) => {
+                    const minutes = Number(appointmentServiceMinutes[service.id]) || 0;
+                    const selected = minutes > 0;
+                    const active = activeAppointmentServiceId === service.id || selected;
+
+                    return (
+                      <article className={selected ? "appointment-service-card selected" : "appointment-service-card"} key={service.id}>
+                        <button type="button" className="appointment-service-main" onClick={() => setActiveAppointmentServiceId((current) => current === service.id && !selected ? null : service.id)}>
+                          <span style={{ background: service.color }} />
+                          <div>
+                            <strong>{service.name}</strong>
+                            <small>{service.shortDescription}</small>
+                          </div>
+                          <b>{selected ? `${minutes} min / \u00a3${appointmentItems.find((item) => item.id === service.id)?.linePrice ?? 0}` : `\u00a3${service.price}`}</b>
+                        </button>
+                        {active && (
+                          <div className="appointment-duration-controls">
+                            {[60, 90, 30, 120].map((amount) => (
+                              <button type="button" key={amount} onClick={() => changeAppointmentServiceMinutes(service.id, amount)}>+{amount}</button>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {appointmentStep === "time" && (
+              <div className="appointment-step appointment-time-step">
+                <div className="appointment-month-row">
+                  <strong>{monthRangeLabel(days, appointmentDayIndex)}</strong>
+                  <span>{appointmentDuration} min service / {appointmentTravelBuffer} min buffer</span>
+                </div>
+                <div className="appointment-date-row" aria-label="Choose appointment date">
+                  {days.map((day, index) => (
+                    <button
+                      type="button"
+                      className={index === appointmentDayIndex ? "appointment-date-cell active" : "appointment-date-cell"}
+                      key={day.id}
+                      onClick={() => {
+                        setAppointmentDayIndex(index);
+                        setAppointmentSlot(null);
+                      }}
+                    >
+                      <span>{day.label.slice(0, 1)}</span>
+                      <strong>{new Date(`${day.dateValue}T00:00:00`).getDate()}</strong>
+                    </button>
+                  ))}
+                </div>
+                <div className="appointment-slot-grid">
+                  {appointmentPreview.slots.length === 0 ? (
+                    <p className="appointment-warning">No available slots for this service length on {fullDateLabel(appointmentDay.dateValue)}.</p>
+                  ) : (
+                    appointmentPreview.slots.map((slot) => (
+                      <button
+                        type="button"
+                        className={appointmentSlot?.start === slot.start ? "appointment-slot active" : "appointment-slot"}
+                        key={`${appointmentDay.id}-${slot.start}`}
+                        onClick={() => setAppointmentSlot(slot)}
+                      >
+                        <span>{formatClock(slot.start)}</span>
+                        <b />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {appointmentStep === "client" && (
+              <div className="appointment-step appointment-client-step">
+                <input
+                  className="appointment-search"
+                  type="search"
+                  placeholder="Search"
+                  value={appointmentCustomerSearch}
+                  onChange={(event) => setAppointmentCustomerSearch(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="appointment-add-customer"
+                  onClick={() => setAppointmentAddCustomerOpen((open) => !open)}
+                >
+                  {appointmentAddCustomerOpen ? "Close new customer" : "+ Add new customer"}
+                </button>
+                {appointmentAddCustomerOpen && (
+                  <form className="appointment-new-customer-form" onSubmit={saveAppointmentNewCustomer}>
+                    <label>
+                      Name
+                      <input
+                        type="text"
+                        placeholder="Client name"
+                        value={appointmentNewCustomer.name}
+                        onChange={(event) => updateAppointmentNewCustomer("name", event.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </label>
+                    <label>
+                      Phone
+                      <input
+                        type="tel"
+                        placeholder="07..."
+                        value={appointmentNewCustomer.phone}
+                        onChange={(event) => updateAppointmentNewCustomer("phone", event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        placeholder="client@example.com"
+                        value={appointmentNewCustomer.email}
+                        onChange={(event) => updateAppointmentNewCustomer("email", event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Address
+                      <input
+                        type="text"
+                        placeholder="Street and house number"
+                        value={appointmentNewCustomer.address}
+                        onChange={(event) => updateAppointmentNewCustomer("address", event.target.value)}
+                      />
+                    </label>
+                    <button type="submit">Save and select client</button>
+                  </form>
+                )}
+                <div className="appointment-customer-list">
+                  {appointmentCustomerResults.length === 0 ? (
+                    <p className="appointment-empty-state">No client found. Add a new customer above.</p>
+                  ) : appointmentCustomerResults.map((customer) => (
+                    <button
+                      type="button"
+                      className={customer.id === appointmentCustomerId ? "appointment-customer-row selected" : "appointment-customer-row"}
+                      key={customer.id}
+                      onClick={() => setAppointmentCustomerId(customer.id)}
+                    >
+                      <span>{customerInitials(customer.name)}</span>
+                      <strong>{customer.name}</strong>
+                      <b>{">"}</b>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {appointmentStep === "review" && (
+              <div className="appointment-step appointment-review-step">
+                <div className="appointment-review-service">
+                  <span style={{ background: appointmentItems[0]?.color ?? SERVICE_COLORS[0] }} />
+                  <div>
+                    <small>Service</small>
+                    <strong>{appointmentItems.length === 1 ? appointmentItems[0].name : `${appointmentItems.length} services`}</strong>
+                    <b>{appointmentDuration} min</b>
+                  </div>
+                </div>
+                <div className="appointment-review-grid">
+                  <div><span>Cost</span><strong>{"\u00a3"}{appointmentTotal}</strong></div>
+                  <div><span>Duration</span><strong>{appointmentDuration} minutes</strong></div>
+                  <div><span>Buffer</span><strong>{appointmentTravelBuffer} minutes</strong></div>
+                </div>
+                <div className="appointment-review-row">
+                  <span>Clock</span>
+                  <div>
+                    <small>Date</small>
+                    <strong>{fullDateLabel(appointmentDay.dateValue)} / {appointmentSlot ? `${formatClock(appointmentSlot.start)} - ${formatClock(appointmentSlot.end)}` : "No time selected"}</strong>
+                  </div>
+                </div>
+                <div className="appointment-review-row">
+                  <span>Person</span>
+                  <div>
+                    <small>Select guest(s)</small>
+                    <strong>{appointmentCustomer?.name ?? "No client selected"}</strong>
+                  </div>
+                </div>
+                <div className="appointment-review-row">
+                  <span>Map</span>
+                  <div>
+                    <small>Select location</small>
+                    <strong>{appointmentCustomer?.address ?? "No address captured"}</strong>
+                  </div>
+                </div>
+                <div className="appointment-review-row">
+                  <span>Notes</span>
+                  <div>
+                    <small>Session notes and treatment preferences</small>
+                    <strong>{appointmentItems.map((item) => `${item.name} (${item.minutes} min)`).join(", ")}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {appointmentLeavePromptOpen && (
+              <div className="appointment-leave-backdrop" role="presentation">
+                <section className="appointment-leave-dialog" role="alertdialog" aria-modal="true" aria-label="Save changes before leaving">
+                  <h3>Save changes before leaving?</h3>
+                  <p>Unsaved changes will disappear forever.</p>
+                  <div>
+                    <button type="button" disabled={!appointmentCanCreate} onClick={saveAndCloseAppointmentWizard}>Yes, save</button>
+                    <button type="button" onClick={closeAppointmentWizard}>Discard and leave</button>
+                  </div>
+                </section>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {overviewBooking && (
+        <div className="admin-overview-backdrop" role="presentation">
+          <section className="admin-overview-modal" role="dialog" aria-modal="true">
+            <div className="admin-overview-heading">
+              <div>
+                <p>Booking overview</p>
+                <h2>{clientNameForBooking(overviewBooking)}</h2>
+              </div>
+              <div className="admin-overview-heading-actions">
+                <button type="button" onClick={() => setOverviewEditing((current) => !current)}>
+                  {overviewEditing ? "Done" : "Edit"}
+                </button>
+                <div className="admin-more-menu-shell">
+                  <button type="button" onClick={() => setOverviewMoreOpen((current) => !current)}>More options</button>
+                  {overviewMoreOpen && (
+                    <div className="admin-more-menu">
+                      <button type="button" onClick={shareOverviewBooking}>Share appointment details</button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await onDuplicateBooking(overviewBooking.id);
+                            setOverviewMoreOpen(false);
+                          } catch (error) {
+                            window.alert(error.message);
+                          }
+                        }}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-danger-option"
+                        onClick={async () => {
+                          try {
+                            await onDeleteBooking(overviewBooking.id);
+                            setOverviewBooking(null);
+                            setOverviewMoreOpen(false);
+                          } catch (error) {
+                            window.alert(error.message);
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <button type="button" onClick={() => setOverviewBooking(null)}>Close</button>
+              </div>
+            </div>
+            <div className="admin-overview-tabs">
+              <button type="button" className={overviewTab === "details" ? "active-overview-tab" : ""} onClick={() => setOverviewTab("details")}>Details</button>
+              <button type="button" className={overviewTab === "history" ? "active-overview-tab" : ""} onClick={() => setOverviewTab("history")}>History</button>
+            </div>
+            {overviewTab === "details" ? (
+              <div className="admin-overview-content">
+                <div>
+                  <span>Client</span>
+                  {overviewEditing ? (
+                    <input value={overviewBooking.clientName || ""} onChange={(event) => updateOverviewBooking({ clientName: event.target.value })} />
+                  ) : (
+                    <strong>{clientNameForBooking(overviewBooking)}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Start time</span>
+                  {overviewEditing ? (
+                    <input type="time" value={minutesToTime(overviewBooking.start)} onChange={(event) => updateOverviewBooking({ start: event.target.value })} />
+                  ) : (
+                    <strong>{formatRange(overviewBooking.start, overviewBooking.sessionEnd)}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Buffer</span>
+                  {overviewEditing ? (
+                    <input type="number" min="0" step="15" value={overviewBooking.travelBuffer} onChange={(event) => updateOverviewBooking({ travelBuffer: event.target.value })} />
+                  ) : (
+                    <strong>{overviewBooking.travelBuffer} minutes</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Location</span>
+                  {overviewEditing ? (
+                    <input value={overviewBooking.address || overviewBooking.location || ""} onChange={(event) => updateOverviewBooking({ address: event.target.value })} />
+                  ) : (
+                    <strong>{overviewBooking.address || overviewBooking.location || "Not captured"}</strong>
+                  )}
+                </div>
+                <div><span>Contact</span><strong>{overviewBooking.customerPhone || overviewBooking.customerEmail || "Not captured"}</strong></div>
+                <div>
+                  <span>Payment method</span>
+                  {overviewEditing ? (
+                    <input value={overviewBooking.paymentMethod || ""} onChange={(event) => updateOverviewBooking({ paymentMethod: event.target.value })} />
+                  ) : (
+                    <strong>{paymentMethodLabel(overviewBooking.paymentMethod)}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Payment status</span>
+                  {overviewEditing ? (
+                    <select
+                      value={overviewBooking.paymentStatus || "awaiting_verification"}
+                      onChange={(event) => updateOverviewBooking({ paymentStatus: event.target.value })}
+                    >
+                      <option value="awaiting_verification">Awaiting verification</option>
+                      <option value="alternative_requested">Alternative requested</option>
+                      <option value="cash_on_arrival">Payment on arrival</option>
+                      <option value="paid">Paid</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  ) : (
+                    <strong>{paymentStatusLabel(overviewBooking.paymentStatus, overviewBooking.status)}</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Reference</span>
+                  <strong>{overviewBooking.bookingReference || "-"}</strong>
+                </div>
+                <div>
+                  <span>Reservation expiry</span>
+                  <strong>{overviewBooking.paymentHoldExpiresAt ? (new Date(overviewBooking.paymentHoldExpiresAt)).toLocaleString() : "-"}</strong>
+                </div>
+                <div>
+                  <span>Base price</span>
+                  <strong>£{Number(overviewBooking.price || 0).toFixed(2)}</strong>
+                </div>
+                <div>
+                  <span>Congestion fee</span>
+                  <strong>£{Number(overviewBooking.congestionFee || 0).toFixed(2)}</strong>
+                </div>
+                <div>
+                  <span>Travel surcharge</span>
+                  <strong>£{Number(overviewBooking.travelFee || 0).toFixed(2)}</strong>
+                </div>
+                <div>
+                  <span>Total due</span>
+                  <strong>£{bookingTotalDue(overviewBooking).toFixed(2)}</strong>
+                </div>
+                {overviewBooking.paymentMethod === "cash"
+                  && overviewBooking.paymentStatus === "cash_on_arrival"
+                  && overviewBooking.status === "payment_method_review" && (
+                  <div className="overview-wide payment-approval-actions">
+                    <span>Payment on arrival request</span>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => updateOverviewBooking({ paymentStatus: "cash_on_arrival", status: "confirmed" })}
+                      >
+                        Approve payment on arrival
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-danger-option"
+                        onClick={() => updateOverviewBooking({ paymentStatus: "cancelled", status: "cancelled" })}
+                      >
+                        Reject payment on arrival
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => updateOverviewBooking({ paymentStatus: "paid", status: "confirmed" })}
+                    disabled={overviewBooking.paymentStatus === "paid" || overviewBooking.status === "cancelled"}
+                  >
+                    Mark Payment Received
+                  </button>
+                </div>
+                <div className="overview-wide">
+                  <span>Services</span>
+                  {itemsForBooking(overviewBooking).map((item, index) => (
+                    <strong key={`${item.name}-${index}`}>{item.name}{item.minutes ? ` / ${item.minutes} minutes` : ""}</strong>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="admin-overview-content">
+                <div className="overview-wide">
+                  <span>History</span>
+                  <strong>Booking created for {formatRange(overviewBooking.start, overviewBooking.sessionEnd)}.</strong>
+                  <strong>Travel buffer reserved for {overviewBooking.travelBuffer} minutes.</strong>
+                  <strong>{itemsForBooking(overviewBooking).length} service line(s) included in this appointment.</strong>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      <nav className="admin-bottom-nav" aria-label="Primary admin navigation">
+        {ADMIN_TABS.map((tab) => (
+          <button
+            type="button"
+            className={activeTab === tab.id ? "active-admin-tab" : ""}
+            key={tab.id}
+            onClick={() => {
+              setActiveTab(tab.id);
+              setSettingsReturnCategory(null);
+              if (tab.id === "settings") {
+                setSelectedSettingsCategory(null);
+                setSelectedSettingsSubsection(null);
+              }
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+    </section>
+  );
 }
 
 function App() {
@@ -2761,7 +4749,7 @@ function App() {
 
       return sanitizeServiceAreas([
         ...current,
-        { active: true, custom: true, id, name: trimmedName },
+        { active: true, congestionFee: 0, custom: true, id, name: trimmedName, travelSurcharge: 0 },
       ]);
     });
   }
@@ -2984,8 +4972,13 @@ function App() {
       location,
       orderId,
       paymentId,
+      paymentMethod,
+      paymentStatus,
+      bookingReference,
+      paymentHoldExpiresAt,
       price,
       savedAddressId,
+      status,
       start: minutesToTime(start),
       telegramUpdates,
       travelFee,
@@ -3094,6 +5087,7 @@ function App() {
         ? appointments.reduce((total, appointment) => total + appointment.total, 0)
         : Number(emailPayload?.total) || 0;
       const paymentStatus = paymentMethodToPaymentStatus(paymentMethod);
+      const bookingStatus = paymentMethodToBookingStatus(paymentMethod);
       await createOrderInSupabase({
         clientEmail: customer?.email ?? "",
         clientName: customer?.name ?? "",
@@ -3134,8 +5128,8 @@ function App() {
             paymentMethod,
             paymentStatus,
             bookingReference: bookingReference || undefined,
-            paymentHoldExpiresAt,
-            status: paymentMethodToBookingStatus(paymentMethod),
+            paymentHoldExpiresAt: paymentMethod === "cash" ? null : paymentHoldExpiresAt,
+            status: bookingStatus,
             price: appointment.price,
             savedAddressId,
             serviceId: appointment.serviceId,
@@ -3178,6 +5172,8 @@ function App() {
         setClientSelectedSlot(null);
         if (paymentMethod === "bank_transfer") {
           setClientBookingMessage("Your appointments are reserved. Your booking is awaiting payment verification.");
+        } else if (paymentMethod === "cash") {
+          setClientBookingMessage("Your booking request has been received. Payment on arrival is awaiting admin approval.");
         } else if (paymentMethod === "alternative_requested") {
           setClientBookingMessage("Your alternative payment request has been submitted and will be reviewed.");
         } else {
@@ -3188,8 +5184,14 @@ function App() {
         const emailTask = postTransactionalEmail({
           payload: {
             ...emailPayload,
+            bookingReference,
             orderId,
             paymentId,
+            paymentMethod,
+            paymentStatus,
+            paymentHoldExpiresAt: paymentMethod === "cash" ? null : paymentHoldExpiresAt,
+            status: bookingStatus,
+            total: totalAmount,
           },
           to: customer?.email,
           type: "bookingConfirmation",
@@ -3197,7 +5199,11 @@ function App() {
         logBookingConfirmation("notification backgrounded");
         void emailTask.catch(() => {
           logBookingConfirmation("notification failed");
-          setClientBookingMessage("Your appointments are confirmed. Confirmation email could not be queued.");
+          setClientBookingMessage(
+            paymentMethod === "cash"
+              ? "Your booking request has been received. Payment on arrival is awaiting admin approval. Confirmation email could not be queued."
+              : "Your appointments are confirmed. Confirmation email could not be queued."
+          );
         });
         return true;
       }
@@ -3247,8 +5253,8 @@ function App() {
         paymentMethod,
         paymentStatus,
         bookingReference: bookingReference || undefined,
-        paymentHoldExpiresAt,
-        status: paymentMethodToBookingStatus(paymentMethod),
+        paymentHoldExpiresAt: paymentMethod === "cash" ? null : paymentHoldExpiresAt,
+        status: bookingStatus,
       });
 
       void Promise.all([
@@ -3270,6 +5276,8 @@ function App() {
       setClientSelectedSlot(null);
       if (paymentMethod === "bank_transfer") {
         setClientBookingMessage("Booking reserved. Your booking is awaiting payment verification.");
+      } else if (paymentMethod === "cash") {
+        setClientBookingMessage("Your booking request has been received. Payment on arrival is awaiting admin approval.");
       } else if (paymentMethod === "alternative_requested") {
         setClientBookingMessage("Your alternative payment request has been submitted and will be reviewed.");
       } else {
@@ -3279,14 +5287,28 @@ function App() {
 
       logBookingConfirmation("notification started");
       const emailTask = postTransactionalEmail({
-        payload: emailPayload,
+        payload: {
+          ...emailPayload,
+          bookingReference,
+          orderId,
+          paymentId,
+          paymentMethod,
+          paymentStatus,
+          paymentHoldExpiresAt: paymentMethod === "cash" ? null : paymentHoldExpiresAt,
+          status: bookingStatus,
+          total: totalAmount,
+        },
         to: customer?.email,
         type: "bookingConfirmation",
       });
       logBookingConfirmation("notification backgrounded");
       void emailTask.catch(() => {
         logBookingConfirmation("notification failed");
-        setClientBookingMessage("Booking confirmed. Confirmation email could not be queued.");
+        setClientBookingMessage(
+          paymentMethod === "cash"
+            ? "Your booking request has been received. Payment on arrival is awaiting admin approval. Confirmation email could not be queued."
+            : "Booking confirmed. Confirmation email could not be queued."
+        );
       });
       return true;
     } catch (error) {
@@ -3299,7 +5321,7 @@ function App() {
     }
   }
 
-  function joinWaitlist(event) {
+  function joinWaitlist(event, contact = {}) {
     event.preventDefault();
 
     const entry = {
@@ -3336,9 +5358,9 @@ function App() {
     setWaitlistEntries((current) => [...current, entry]);
     notifyAdminTelegram("waitlist_request", {
       ...entry,
-      area: selectedArea?.name || "",
-      email: contactDetails.email,
-      phone: contactDetails.phone,
+      area: contact.areaName || "",
+      email: contact.email || "",
+      phone: contact.phone || "",
     });
     setWaitlistForm((current) => ({
       ...current,
@@ -3474,11 +5496,54 @@ function App() {
 
     try {
       await updateBookingInSupabase(nextBooking);
-      notifyAdminTelegram("booking_modified", { bookingId: id, newBooking: nextBooking, oldBooking });
+      const paymentChanged = (
+        Object.prototype.hasOwnProperty.call(normalizedPatch, "paymentMethod")
+        || Object.prototype.hasOwnProperty.call(normalizedPatch, "paymentStatus")
+      );
+
+      if (paymentChanged) {
+        notifyAdminTelegram("payment_status", {
+          amount: bookingTotalDue(nextBooking),
+          booking: nextBooking,
+          bookingStatus: nextBooking.status,
+          paymentMethod: nextBooking.paymentMethod,
+          status: nextBooking.paymentStatus,
+        });
+
+        if (nextBooking.customerEmail) {
+          const isRejectedPaymentOnArrival = (
+            oldBooking?.paymentMethod === "cash"
+            && nextBooking.status === "cancelled"
+          );
+          const emailRequest = isRejectedPaymentOnArrival
+            ? {
+                payload: bookingEmailPayload(nextBooking),
+                to: nextBooking.customerEmail,
+                type: "cancellationConfirmation",
+              }
+            : nextBooking.paymentMethod === "cash"
+              ? {
+                  payload: bookingEmailPayload(nextBooking),
+                  to: nextBooking.customerEmail,
+                  type: "bookingConfirmation",
+                }
+              : null;
+
+          if (emailRequest) {
+            void postTransactionalEmail(emailRequest).catch((error) => {
+              console.warn("Payment status email could not be sent", {
+                name: error?.name || "Error",
+              });
+            });
+          }
+        }
+      } else {
+        notifyAdminTelegram("booking_modified", { bookingId: id, newBooking: nextBooking, oldBooking });
+      }
       setDays((current) =>
         current.map((day) => ({
           ...day,
-          bookings: day.bookings.map((booking) => (booking.id === id ? { ...booking, ...patch } : booking)),
+          bookings: day.bookings.map((booking) => (booking.id === id ? { ...booking, ...normalizedPatch } : booking)),
         }))
       );
       return nextBooking;
