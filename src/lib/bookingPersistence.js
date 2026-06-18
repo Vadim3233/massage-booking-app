@@ -1,5 +1,6 @@
 import { buildBookingClientLink } from "./clientData.js";
 import {
+  DEFAULT_SERVICES,
   DEFAULT_TRAVEL_BUFFER,
   minutesToTime,
   timeToMinutes,
@@ -49,6 +50,7 @@ export function normalizeStoredBooking(booking) {
     price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
     serviceId: String(booking.serviceId),
     serviceName: String(booking.serviceName),
+    status: typeof booking.status === "string" ? booking.status : "confirmed",
     startMinutes,
     telegramUpdates: Boolean(booking.telegramUpdates),
     duration: Number(booking.duration),
@@ -60,7 +62,7 @@ export function normalizeStoredBooking(booking) {
 export function paymentMethodToPaymentStatus(paymentMethod) {
   if (paymentMethod === "card") return "pending";
   if (paymentMethod === "alternative_requested") return "alternative_requested";
-  if (paymentMethod === "cash") return "awaiting_verification";
+  if (paymentMethod === "cash") return "cash_on_arrival";
   return "pending";
 }
 
@@ -82,7 +84,7 @@ export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = 
     card: { paymentStatus: "pending", status: "payment_method_review" },
     bank_transfer: { paymentStatus: "awaiting_verification", status: "pending_payment_verification" },
     alternative_requested: { paymentStatus: "alternative_requested", status: "payment_method_review" },
-    cash: { paymentStatus: "awaiting_verification", status: "payment_method_review" },
+    cash: { paymentStatus: "cash_on_arrival", status: "payment_method_review" },
   };
 
   if (Object.prototype.hasOwnProperty.call(nextPatch, "paymentMethod") && nextPaymentMethod in defaultMapping) {
@@ -107,7 +109,11 @@ export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = 
     } else if (nextPaymentStatus === "alternative_requested") {
       nextStatus = "payment_method_review";
     } else if (nextPaymentStatus === "cash_on_arrival") {
-      nextStatus = "payment_method_review";
+      const cashApprovalRequested = Object.prototype.hasOwnProperty.call(nextPatch, "status")
+        && nextPatch.status === "confirmed";
+      nextStatus = cashApprovalRequested || currentBooking.status === "confirmed"
+        ? "confirmed"
+        : "payment_method_review";
     } else if (nextPaymentStatus === "cancelled") {
       nextStatus = "cancelled";
     }
@@ -115,7 +121,9 @@ export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = 
 
   if (Object.prototype.hasOwnProperty.call(nextPatch, "status")) {
     if (nextStatus === "confirmed") {
-      nextPaymentStatus = "paid";
+      if (!(nextPaymentMethod === "cash" && nextPaymentStatus === "cash_on_arrival")) {
+        nextPaymentStatus = "paid";
+      }
     }
     if (nextStatus === "pending_payment_verification") {
       nextPaymentStatus = "awaiting_verification";
@@ -124,7 +132,7 @@ export function normalizeAdminBookingApprovalPatch(patch = {}, currentBooking = 
       if (nextPaymentMethod === "alternative_requested") {
         nextPaymentStatus = "alternative_requested";
       } else if (nextPaymentMethod === "cash") {
-        nextPaymentStatus = "awaiting_verification";
+        nextPaymentStatus = "cash_on_arrival";
       } else if (nextPaymentStatus !== "alternative_requested" && nextPaymentStatus !== "cash_on_arrival") {
         nextPaymentStatus = "awaiting_verification";
       }
@@ -184,6 +192,7 @@ export function engineBookingToStorageBooking(booking) {
     price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
     serviceId: String(booking.serviceId),
     serviceName: String(booking.serviceName),
+    status: typeof booking.status === "string" ? booking.status : "confirmed",
     startMinutes,
     telegramUpdates: Boolean(booking.telegramUpdates),
     duration: Number(booking.duration),
@@ -256,5 +265,66 @@ export function bookingToLegacySupabasePayload(booking, status = "confirmed") {
     postcode: normalized.location || null,
     status,
     notes: JSON.stringify({ appBooking: normalized }),
+  };
+}
+
+function serviceIdForName(serviceName) {
+  const normalizedName = String(serviceName ?? "").trim().toLowerCase();
+  const matchedId = DEFAULT_SERVICES.find((service) => service.name.toLowerCase() === normalizedName)?.id;
+  return matchedId || normalizedName.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom-service";
+}
+
+export function supabaseRowToStorageBooking(row) {
+  if (!row || typeof row !== "object") return null;
+
+  let noteData = {};
+  try {
+    noteData = row.notes ? JSON.parse(row.notes) : {};
+  } catch {
+    noteData = {};
+  }
+
+  const savedBooking = normalizeStoredBooking(noteData.appBooking);
+  if (savedBooking) {
+    return {
+      ...savedBooking,
+      id: String(row.id ?? savedBooking.id),
+      userId: typeof row.user_id === "string" ? row.user_id : savedBooking.userId,
+      savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : savedBooking.savedAddressId,
+    };
+  }
+
+  const serviceName = String(row.service_name ?? row.service ?? "Custom service");
+  const startMinutes = Number(row.start_minutes);
+  const duration = Number(row.duration_minutes);
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(duration)) return null;
+
+  return {
+    address: typeof row.address === "string" ? row.address : "",
+    bookingReference: typeof row.booking_reference === "string" ? row.booking_reference : "",
+    congestionFee: isFiniteNumber(row.congestion_fee) ? Number(row.congestion_fee) : 0,
+    clientName: typeof row.client_name === "string" ? row.client_name : "",
+    customerEmail: typeof row.client_email === "string" ? row.client_email : "",
+    customerPhone: typeof row.client_phone === "string" ? row.client_phone : "",
+    userId: typeof row.user_id === "string" ? row.user_id : "",
+    savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : "",
+    id: String(row.id),
+    items: [],
+    kind: serviceIdForName(serviceName) === "personal-event" ? "personal" : "booking",
+    location: typeof row.selected_area === "string" ? row.selected_area : typeof row.postcode === "string" ? row.postcode : "",
+    orderId: typeof row.order_id === "string" ? row.order_id : "",
+    paymentHoldExpiresAt: typeof row.payment_hold_expires_at === "string" ? row.payment_hold_expires_at : null,
+    paymentId: typeof row.payment_id === "string" ? row.payment_id : "",
+    paymentMethod: typeof row.payment_method === "string" ? row.payment_method : "",
+    paymentStatus: typeof row.payment_status === "string" ? row.payment_status : "",
+    price: isFiniteNumber(row.price) ? Number(row.price) : 0,
+    serviceId: typeof row.service_id === "string" && row.service_id ? row.service_id : serviceIdForName(serviceName),
+    serviceName,
+    startMinutes,
+    status: typeof row.status === "string" ? row.status : "confirmed",
+    telegramUpdates: false,
+    duration,
+    travelFee: isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : 0,
+    travelBuffer: DEFAULT_TRAVEL_BUFFER,
   };
 }

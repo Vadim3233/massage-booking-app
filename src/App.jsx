@@ -35,6 +35,7 @@ import {
   paymentMethodToBookingStatus,
   paymentMethodToPaymentStatus,
   normalizeAdminBookingApprovalPatch,
+  supabaseRowToStorageBooking,
 } from "./lib/bookingPersistence.js";
 import {
   saveBookingToSupabase,
@@ -342,9 +343,14 @@ function engineBookingToStorageBooking(booking) {
     kind: booking.kind === "personal" ? "personal" : "booking",
     orderId: typeof booking.orderId === "string" ? booking.orderId : "",
     paymentId: typeof booking.paymentId === "string" ? booking.paymentId : "",
+    paymentMethod: typeof booking.paymentMethod === "string" ? booking.paymentMethod : "",
+    paymentStatus: typeof booking.paymentStatus === "string" ? booking.paymentStatus : "",
+    bookingReference: typeof booking.bookingReference === "string" ? booking.bookingReference : "",
+    paymentHoldExpiresAt: typeof booking.paymentHoldExpiresAt === "string" ? booking.paymentHoldExpiresAt : null,
     price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
     serviceId: String(booking.serviceId),
     serviceName: String(booking.serviceName),
+    status: typeof booking.status === "string" ? booking.status : "confirmed",
     startMinutes,
     telegramUpdates: Boolean(booking.telegramUpdates),
     duration: Number(booking.duration),
@@ -413,71 +419,20 @@ function storageBookingToEngineBooking(booking) {
     location: normalized.location,
     orderId: normalized.orderId,
     paymentId: normalized.paymentId,
+    paymentMethod: normalized.paymentMethod,
+    paymentStatus: normalized.paymentStatus,
+    bookingReference: normalized.bookingReference,
+    paymentHoldExpiresAt: normalized.paymentHoldExpiresAt,
     price: normalized.price,
     travelFee: normalized.travelFee,
     congestionFee: normalized.congestionFee,
     serviceId: normalized.serviceId,
     serviceName: normalized.serviceName,
+    status: normalized.status,
     telegramUpdates: normalized.telegramUpdates,
     start: minutesToTime(normalized.startMinutes),
     duration: normalized.duration,
     travelBuffer: normalized.travelBuffer,
-  };
-}
-
-function serviceIdForName(serviceName) {
-  const normalizedName = String(serviceName ?? "").trim().toLowerCase();
-  const matchedId = DEFAULT_SERVICES.find((service) => service.name.toLowerCase() === normalizedName)?.id;
-  return matchedId || normalizedName.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom-service";
-}
-
-function supabaseRowToStorageBooking(row) {
-  if (!row || typeof row !== "object") return null;
-
-  let noteData = {};
-  try {
-    noteData = row.notes ? JSON.parse(row.notes) : {};
-  } catch {
-    noteData = {};
-  }
-
-  const savedBooking = normalizeStoredBooking(noteData.appBooking);
-  if (savedBooking) {
-    return {
-      ...savedBooking,
-      id: String(row.id ?? savedBooking.id),
-      userId: typeof row.user_id === "string" ? row.user_id : savedBooking.userId,
-      savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : savedBooking.savedAddressId,
-    };
-  }
-
-  const serviceName = String(row.service ?? "Custom service");
-  const startMinutes = Number(row.start_minutes);
-  const duration = Number(row.duration_minutes);
-  if (!Number.isFinite(startMinutes) || !Number.isFinite(duration)) return null;
-
-  return {
-    address: typeof row.address === "string" ? row.address : "",
-    congestionFee: isFiniteNumber(row.congestion_fee) ? Number(row.congestion_fee) : 0,
-    clientName: typeof row.client_name === "string" ? row.client_name : "",
-    customerEmail: typeof row.client_email === "string" ? row.client_email : "",
-    customerPhone: typeof row.client_phone === "string" ? row.client_phone : "",
-    userId: typeof row.user_id === "string" ? row.user_id : "",
-    savedAddressId: typeof row.saved_address_id === "string" ? row.saved_address_id : "",
-    id: String(row.id),
-    items: [],
-    kind: serviceIdForName(serviceName) === "personal-event" ? "personal" : "booking",
-    location: typeof row.selected_area === "string" ? row.selected_area : typeof row.postcode === "string" ? row.postcode : "",
-    orderId: typeof row.order_id === "string" ? row.order_id : "",
-    paymentId: typeof row.payment_id === "string" ? row.payment_id : "",
-    price: isFiniteNumber(row.price) ? Number(row.price) : 0,
-    serviceId: serviceIdForName(serviceName),
-    serviceName: typeof row.service_name === "string" ? row.service_name : serviceName,
-    startMinutes,
-    telegramUpdates: false,
-    duration,
-    travelFee: isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : 0,
-    travelBuffer: DEFAULT_TRAVEL_BUFFER,
   };
 }
 
