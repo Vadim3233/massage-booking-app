@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import transactionalEmailsHandler from "../../api/transactional-emails.js";
 import internalTransactionalEmailsHandler from "../../api/internal-transactional-emails.js";
 import telegramNotificationsHandler from "../../api/telegram-notifications.js";
+import telegramTestHandler from "../../api/telegram-test.js";
 
 function createMockResponse() {
   const res = { _status: 200, _headers: {}, _body: null };
@@ -101,6 +102,38 @@ async function run() {
       await internalTransactionalEmailsHandler(request, response);
       assert.equal(response._status, 403);
       assert.equal(response._body.error, "Forbidden");
+    }
+
+    // Telegram test preflight permits only the explicit local development origins.
+    for (const origin of ["http://127.0.0.1:5173", "http://localhost:5173"]) {
+      const request = createMockRequest({
+        method: "OPTIONS",
+        headers: {
+          origin,
+          host: "massage-booking-app-nine.vercel.app",
+        },
+      });
+      const response = createMockResponse();
+
+      await telegramTestHandler(request, response);
+      assert.equal(response._status, 204);
+      assert.equal(response._headers["Access-Control-Allow-Origin"], origin);
+      assert.equal(response._headers["Access-Control-Allow-Methods"], "GET,POST,OPTIONS");
+    }
+
+    {
+      const request = createMockRequest({
+        method: "OPTIONS",
+        headers: {
+          origin: "https://evil.example.com",
+          host: "massage-booking-app-nine.vercel.app",
+        },
+      });
+      const response = createMockResponse();
+
+      await telegramTestHandler(request, response);
+      assert.equal(response._status, 403);
+      assert.equal(response._headers["Access-Control-Allow-Origin"], undefined);
     }
 
     // Telegram rate limiting still works on the protected endpoint.

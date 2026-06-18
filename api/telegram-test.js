@@ -3,6 +3,10 @@ import { sendTelegramTestMessage } from "../server/telegramProvider.js";
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
 const rateLimitBuckets = new Map();
+const LOCAL_DEV_ORIGIN_HOSTS = new Set([
+  "127.0.0.1:5173",
+  "localhost:5173",
+]);
 
 function normalizeOriginHost(value = "") {
   try {
@@ -24,7 +28,8 @@ function allowedOriginHosts(request) {
 function isAllowedOrigin(request) {
   const origin = request.headers.origin;
   if (!origin) return process.env.NODE_ENV !== "production";
-  return allowedOriginHosts(request).has(normalizeOriginHost(origin));
+  const originHost = normalizeOriginHost(origin);
+  return LOCAL_DEV_ORIGIN_HOSTS.has(originHost) || allowedOriginHosts(request).has(originHost);
 }
 
 function clientKey(request) {
