@@ -350,9 +350,9 @@ function ServicesSection({ services, serviceDetails, onServiceNameChange, onServ
     ...service,
     color: SERVICE_COLORS[index % SERVICE_COLORS.length],
     ...(serviceDetails[service.id] ?? {
-      buffer: service.id === "head-massage" ? 30 : DEFAULT_TRAVEL_BUFFER,
-      duration: service.id === "head-massage" ? 60 : 90,
-      price: service.id === "head-massage" ? 78 : 120 + index * 12,
+      buffer: DEFAULT_TRAVEL_BUFFER,
+      duration: 90,
+      price: 120 + index * 10,
     }),
   }));
 

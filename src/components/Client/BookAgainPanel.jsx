@@ -45,13 +45,13 @@ export function BookAgainPanel({
         {lastSelection && (
           <button type="button" onClick={() => onApply(lastSelection)}>
             <span>Repeat last session</span>
-            <small>{serviceNames(lastSelection)} · {lastSelection.totalDuration} min</small>
+            <small>{serviceNames(lastSelection)} - {lastSelection.totalDuration} min</small>
           </button>
         )}
         {favoriteSelection && favoriteSelection.key !== lastSelection?.key && (
           <button type="button" onClick={() => onApply(favoriteSelection)}>
             <span>Favourite session</span>
-            <small>{serviceNames(favoriteSelection)} · {favoriteSelection.totalDuration} min</small>
+            <small>{serviceNames(favoriteSelection)} - {favoriteSelection.totalDuration} min</small>
           </button>
         )}
       </div>

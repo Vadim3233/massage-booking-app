@@ -7,17 +7,15 @@ import {
   Home,
   Leaf,
   MapPin,
-  Moon,
   Sparkles,
   Waves,
 } from "lucide-react";
 
 const serviceIconMap = {
-  "cloud-nine": Moon,
-  "deep-tissue": Activity,
-  prenatal: HeartPulse,
-  sports: Waves,
-  "zero-gravity": Sparkles,
+  massage: Waves,
+  "assisted-stretching": Activity,
+  "soft-tissue-therapy": HeartPulse,
+  "body-exam": Sparkles,
 };
 
 export function AppShell({ children, className = "" }) {

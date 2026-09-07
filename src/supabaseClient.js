@@ -9,6 +9,15 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
+export const publicSupabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    persistSession: false,
+    storageKey: "vadmassage-public-supabase",
+  },
+});
+
 export async function getCurrentSession() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
@@ -20,6 +29,15 @@ export async function signInClientWithGoogle(redirectTo) {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signInClientWithEmail(email, redirectTo) {
+  const { data, error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo },
   });
   if (error) throw error;
   return data;

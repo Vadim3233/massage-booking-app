@@ -38,6 +38,8 @@ function AdminWorkspace({
   onSetSelectedDayIndex,
   onUpdateBooking,
   onUpdateSetting,
+  onSendTelegramTest,
+  formatTelegramTestError,
   preview,
   requestedDuration,
   requestedTravelBuffer,
@@ -56,14 +58,21 @@ function AdminWorkspace({
 
   // Handle telegram test
   async function sendTelegramTestFromSettings() {
+    if (typeof onSendTelegramTest !== "function") {
+      setTelegramTestStatus({
+        sending: false,
+        message: "Telegram test is unavailable in this legacy admin workspace.",
+        type: "error"
+      });
+      return;
+    }
+
     setTelegramTestStatus({ sending: true, message: "", type: "" });
     
     try {
-      // Import the telegram test function from App.jsx
-      const { postTelegramTest, telegramTestErrorMessage } = await import("../../App.jsx");
-      const result = await postTelegramTest();
+      const result = await onSendTelegramTest();
       
-      if (result.sent) {
+      if (result?.sent !== false) {
         setTelegramTestStatus({
           sending: false,
           message: "Test message sent successfully!",
@@ -77,10 +86,12 @@ function AdminWorkspace({
         });
       }
     } catch (error) {
-      const { telegramTestErrorMessage } = await import("../../App.jsx");
+      const message = typeof formatTelegramTestError === "function"
+        ? formatTelegramTestError(error)
+        : error?.message || "Telegram test could not be sent.";
       setTelegramTestStatus({
         sending: false,
-        message: telegramTestErrorMessage(error),
+        message,
         type: "error"
       });
     }

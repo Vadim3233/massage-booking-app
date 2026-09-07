@@ -1,3 +1,6 @@
+import { sessionPreferenceLabels } from "../src/lib/sessionPreferences.js";
+import { getServerBankTransferDetails } from "./bankTransferDetails.js";
+
 const currencyFormatter = new Intl.NumberFormat("en-GB", {
   currency: "GBP",
   style: "currency",
@@ -26,6 +29,32 @@ function renderLineItems(items = []) {
       const detail = item.minutes ? `${item.minutes} minutes` : formatMoney(item.price);
       return `<li><strong>${escapeHtml(item.name)}</strong> <span>${escapeHtml(detail)}</span></li>`;
     })
+    .join("");
+}
+
+function renderSessionPreferences(payload = {}) {
+  const preferenceLabels = Array.isArray(payload.sessionPreferences) && payload.sessionPreferences.length > 0
+    ? payload.sessionPreferences.map((label) => String(label || "").trim()).filter(Boolean)
+    : sessionPreferenceLabels(payload.sessionPreferenceIds);
+  const sessionNotes = String(payload.sessionNotes || "").trim();
+
+  if (preferenceLabels.length === 0 && !sessionNotes) return "";
+
+  return `
+    <h2 style="font-size:18px;">Session preferences</h2>
+    ${preferenceLabels.length > 0 ? `<p><strong>Session preferences:</strong> ${escapeHtml(preferenceLabels.join(", "))}</p>` : ""}
+    ${sessionNotes ? `<p><strong>Client note:</strong> ${escapeHtml(sessionNotes)}</p>` : ""}
+  `;
+}
+
+function renderBankTransferDetails() {
+  const bankDetails = getServerBankTransferDetails();
+  if (!bankDetails.isConfigured) {
+    return `<li>${escapeHtml(bankDetails.message)}</li>`;
+  }
+
+  return bankDetails.rows
+    .map((detail) => `<li><strong>${escapeHtml(detail.label)}:</strong> ${escapeHtml(detail.value)}</li>`)
     .join("");
 }
 
@@ -73,7 +102,7 @@ function renderAppointments(appointments = []) {
               <li><strong>Area:</strong> ${escapeHtml(appointment.location)}</li>
               <li><strong>Price:</strong> ${formatMoney(appointment.price)}</li>
             </ul>
-            <a href="${manageUrl}" style="color:#0d77d8;font-weight:bold;">Manage this booking</a>
+            <a href="${manageUrl}" style="color:#0d77d8;font-weight:bold;">Change or cancel this booking</a>
           </td>
         </tr>
       `;
@@ -165,17 +194,17 @@ export const emailTemplates = {
       <ul>
         <li><strong>Reference:</strong> ${escapeHtml(payload.bookingReference || payload.orderId || payload.id || "-")}</li>
         <li><strong>Amount due:</strong> ${formatMoney(payload.total)}</li>
-        <li><strong>Bank:</strong> VAD Massage — Account: 12345678 — Sort: 12-34-56</li>
-        <li><strong>Wise:</strong> Payment link placeholder</li>
+        ${renderBankTransferDetails()}
       </ul>
     `;
 
     const body = `
       <p>Hi ${escapeHtml(customerName)},</p>
-      <p>${isCashAwaitingApproval ? "Your booking request has been received. Payment on arrival is awaiting admin approval." : isCashApproved ? "Your booking is confirmed. Payment is due on arrival." : isPending ? "We have received your booking request. Your appointment is reserved while payment is being completed." : isAlternative ? "We have received your request for an alternative payment method. Our team will review it and be in touch." : (appointments.length > 1 ? "Your appointments are confirmed." : "Your booking is confirmed.")}</p>
+      <p>${isCashAwaitingApproval ? "I've received your cash payment request and I'll confirm shortly." : isCashApproved ? "Your booking is confirmed. Payment is due on arrival." : isPending ? "I've received your booking. Your appointment is reserved while you complete payment." : isAlternative ? "I've received your payment request and I'll be in touch." : (appointments.length > 1 ? "Your appointments are confirmed." : "Your booking is confirmed.")}</p>
       ${appointmentsBody}
+      ${renderSessionPreferences(payload)}
       <p><strong>Total:</strong> ${formatMoney(payload.total)}</p>
-      ${isCashOnArrival || isPending ? paymentInstructions : isAlternative ? `<p>We will contact you regarding alternative payment arrangements.</p>${paymentInstructions}` : ""}
+      ${isCashOnArrival || isPending ? paymentInstructions : isAlternative ? `<p>I'll contact you about the payment arrangements.</p>${paymentInstructions}` : ""}
       <p style="margin:24px 0;">
         <a href="${changeRequestUrl}" style="background:#0d77d8;color:#ffffff;display:inline-block;padding:12px 18px;text-decoration:none;">
           Request change or cancellation
@@ -197,19 +226,27 @@ export const emailTemplates = {
       : isCashApproved
         ? "Your booking is confirmed"
         : isPending
-          ? "Booking request received — awaiting payment verification"
+          ? "I've received your booking request"
           : isAlternative
             ? "Alternative payment request received"
             : (appointments.length > 1 ? "Your appointments are confirmed" : "Your booking is confirmed");
 
+    const preferenceLabels = Array.isArray(payload.sessionPreferences) && payload.sessionPreferences.length > 0
+      ? payload.sessionPreferences.map((label) => String(label || "").trim()).filter(Boolean)
+      : sessionPreferenceLabels(payload.sessionPreferenceIds);
+    const sessionPreferenceText = [
+      preferenceLabels.length > 0 ? `Session preferences: ${preferenceLabels.join(", ")}.` : "",
+      payload.sessionNotes ? `Client note: ${payload.sessionNotes}.` : "",
+    ].filter(Boolean).join(" ");
+
     const text = isCashAwaitingApproval
-      ? `Your booking request has been received for ${payload.date} at ${payload.time}. Payment on arrival is awaiting admin approval. Reference: ${payload.bookingReference || "-"}. Amount due on arrival: ${formatMoney(payload.total)}.`
+      ? `I've received your cash payment request for ${payload.date} at ${payload.time}. I'll confirm shortly. Reference: ${payload.bookingReference || "-"}. Amount due on arrival: ${formatMoney(payload.total)}.`
       : isCashApproved
         ? `Your booking is confirmed for ${payload.date} at ${payload.time}. Payment is due on arrival. Reference: ${payload.bookingReference || "-"}. Total: ${formatMoney(payload.total)}.`
         : isPending
-          ? `Your booking request has been received for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. Amount due: ${formatMoney(payload.total)}. Your appointment will be confirmed once payment has been received and verified.`
+          ? `I've received your booking request for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. Amount due: ${formatMoney(payload.total)}. I'll confirm your appointment as soon as I've checked your payment.`
           : isAlternative
-            ? `Your alternative payment request has been received for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. We'll review and be in touch.`
+            ? `I've received your payment request for ${payload.date} at ${payload.time}. Reference: ${payload.bookingReference || "-"}. I'll review it and be in touch.`
             : (appointments.length > 1
               ? `Your appointments are confirmed. Total: ${formatMoney(payload.total)}.`
               : `Your booking is confirmed for ${payload.date} at ${payload.time}. Total: ${formatMoney(payload.total)}.`);
@@ -217,7 +254,7 @@ export const emailTemplates = {
     return {
       html: layout(subject, body),
       subject,
-      text,
+      text: [text, sessionPreferenceText].filter(Boolean).join(" "),
     };
   },
 
@@ -258,6 +295,11 @@ export const emailTemplates = {
   receipt(payload = {}) {
     const body = `
       <p>Thanks for your payment. Here is your receipt.</p>
+      <ul>
+        <li><strong>Reference:</strong> ${escapeHtml(payload.bookingReference || payload.paymentReference || payload.orderId || payload.id || "-")}</li>
+        <li><strong>Payment method:</strong> ${escapeHtml(payload.paymentMethod || "-")}</li>
+        <li><strong>Payment received:</strong> ${escapeHtml(payload.paymentReceivedAt || "-")}</li>
+      </ul>
       <ul>${renderLineItems(payload.items)}</ul>
       <p><strong>Total paid:</strong> ${formatMoney(payload.total)}</p>
     `;
@@ -265,7 +307,7 @@ export const emailTemplates = {
     return {
       html: layout("Receipt", body),
       subject: "Your booking receipt",
-      text: `Receipt total: ${formatMoney(payload.total)}.`,
+      text: `Receipt ${payload.bookingReference || payload.paymentReference || ""}. Total paid: ${formatMoney(payload.total)}.`,
     };
   },
 };

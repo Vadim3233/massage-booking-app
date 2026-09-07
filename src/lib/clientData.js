@@ -1,3 +1,6 @@
+import { supabaseRowToStorageBooking } from "./bookingPersistence.js";
+import { normalizeSessionPreferenceIds, sessionPreferenceLabels } from "./sessionPreferences.js";
+
 /**
  * @typedef {Object} ClientProfile
  * @property {string} userId
@@ -37,10 +40,67 @@ function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeSessionPreferenceSnapshotLabels(value = []) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === "string") return { id: "", label: cleanText(item) };
+      if (!item || typeof item !== "object") return null;
+      return { id: cleanText(item.id), label: cleanText(item.label) };
+    })
+    .filter((item) => item?.label);
+}
+
+function normalizeSelectionSessionPreferenceIds(ids = [], labels = []) {
+  if (!Array.isArray(ids)) return [];
+  const knownIds = normalizeSessionPreferenceIds(ids);
+  const snapshotIds = new Set(normalizeSessionPreferenceSnapshotLabels(labels).map((item) => item.id).filter(Boolean));
+  const normalized = [];
+  ids.map(cleanText).filter(Boolean).forEach((id) => {
+    if ((knownIds.includes(id) || snapshotIds.has(id)) && !normalized.includes(id)) {
+      normalized.push(id);
+    }
+  });
+  return normalized;
+}
+
 function requireUuidLike(value, fieldName) {
   const normalized = cleanText(value);
   if (!normalized) throw new Error(`${fieldName} is required.`);
   return normalized;
+}
+
+const CLIENT_BOOKING_FULL_SELECT = "id,user_id,client_name,client_email,client_phone,service_id,service,service_name,duration_minutes,selected_area,address,notes,price,selected_services,selected_durations,saved_address_id,created_at,date,start_minutes,status,payment_status,payment_method,payment_id,order_id,travel_fee,congestion_fee,cancelled_at,cancelled_by,cancellation_window";
+const CLIENT_BOOKING_COMPAT_SELECT = "id,user_id,client_name,client_email,client_phone,service_id,service,service_name,duration_minutes,selected_area,address,notes,price,selected_services,selected_durations,saved_address_id,created_at,date,start_minutes,status";
+
+function isMissingColumnError(error) {
+  const message = cleanText(error?.message || error?.details || error?.hint).toLowerCase();
+  return error?.code === "42703" || message.includes("column") && message.includes("does not exist");
+}
+
+async function fetchCurrentClientBookingRows({
+  client,
+  limit,
+  orderBy = [],
+  userId,
+}) {
+  const runQuery = async (selectColumns) => {
+    let query = client
+      .from("bookings")
+      .select(selectColumns)
+      .eq("user_id", userId);
+
+    for (const [column, options] of orderBy) {
+      query = query.order(column, options);
+    }
+
+    return query.limit(limit);
+  };
+
+  const result = await runQuery(CLIENT_BOOKING_FULL_SELECT);
+  if (!result.error || !isMissingColumnError(result.error)) return result;
+
+  return runQuery(CLIENT_BOOKING_COMPAT_SELECT);
 }
 
 function normalizeDurationMap(value) {
@@ -87,6 +147,9 @@ export function normalizeBookingSelection(selection) {
     savedAddressId: cleanText(selection.savedAddressId || selection.saved_address_id) || null,
     address: cleanText(selection.address),
     notes: cleanText(selection.notes),
+    sessionNotes: cleanText(selection.sessionNotes || selection.notes),
+    sessionPreferenceIds: normalizeSelectionSessionPreferenceIds(selection.sessionPreferenceIds, selection.sessionPreferenceLabels),
+    sessionPreferenceLabels: normalizeSessionPreferenceSnapshotLabels(selection.sessionPreferenceLabels),
     lastBookedAt: cleanText(selection.lastBookedAt || selection.last_booked_at),
   };
 }
@@ -117,6 +180,9 @@ export function bookingRowToSelection(row = {}) {
     savedAddressId: row.saved_address_id,
     address: row.address,
     notes: row.notes,
+    sessionNotes: row.sessionNotes,
+    sessionPreferenceIds: row.sessionPreferenceIds,
+    sessionPreferenceLabels: row.sessionPreferenceLabels,
     lastBookedAt: row.created_at,
   });
 }
@@ -286,13 +352,25 @@ export async function upsertCurrentClientProfile(profile, client = null) {
   client = await resolveClient(client);
   const userId = await getAuthenticatedUserId(client);
   const normalized = normalizeClientProfile({ ...profile, userId });
+  let phone = normalized.phone;
+
+  if (!phone) {
+    const { data: existingProfile, error: existingProfileError } = await client
+      .from("client_profiles")
+      .select("phone")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existingProfileError) throw existingProfileError;
+    phone = cleanText(existingProfile?.phone);
+  }
+
   const { data, error } = await client
     .from("client_profiles")
     .upsert({
       user_id: userId,
       full_name: normalized.fullName || null,
       email: normalized.email || null,
-      phone: normalized.phone || null,
+      phone: phone || null,
     }, { onConflict: "user_id" })
     .select()
     .single();
@@ -395,14 +473,72 @@ export async function upsertCurrentClientPreferences(preferences, client = null)
 export async function listCurrentClientBookingHistory(limit = 30, client = null) {
   client = await resolveClient(client);
   const userId = await getAuthenticatedUserId(client);
-  const { data, error } = await client
-    .from("bookings")
-    .select("id,user_id,service,service_name,duration_minutes,selected_area,address,notes,price,selected_services,selected_durations,saved_address_id,created_at,date,start_minutes")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(Math.max(1, Math.min(100, Number(limit) || 30)));
+  const { data, error } = await fetchCurrentClientBookingRows({
+    client,
+    userId,
+    limit: Math.max(1, Math.min(100, Number(limit) || 30)),
+    orderBy: [["created_at", { ascending: false }]],
+  });
   if (error) throw error;
   return data || [];
+}
+
+export async function listCurrentClientPortalBookings(limit = 100, client = null) {
+  client = await resolveClient(client);
+  const userId = await getAuthenticatedUserId(client);
+  const { data, error } = await fetchCurrentClientBookingRows({
+    client,
+    userId,
+    limit: Math.max(1, Math.min(200, Number(limit) || 100)),
+    orderBy: [
+      ["date", { ascending: false }],
+      ["start_minutes", { ascending: false }],
+    ],
+  });
+  if (error) throw error;
+  return (data || []).map(normalizeClientPortalBooking).filter(Boolean);
+}
+
+export async function rescheduleCurrentClientBooking({
+  bookingId,
+  newDate,
+  newStartMinutes,
+} = {}, client = null) {
+  client = await resolveClient(client);
+  await getAuthenticatedUserId(client);
+
+  const normalizedBookingId = requireUuidLike(bookingId, "Booking id");
+  const normalizedDate = cleanText(newDate);
+  const normalizedStartMinutes = Number(newStartMinutes);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    throw new Error("New booking date is required.");
+  }
+  if (!Number.isInteger(normalizedStartMinutes) || normalizedStartMinutes < 0 || normalizedStartMinutes >= 1440) {
+    throw new Error("New start time is invalid.");
+  }
+
+  const { data, error } = await client.rpc("reschedule_client_booking", {
+    booking_id: normalizedBookingId,
+    new_date: normalizedDate,
+    new_start_minutes: normalizedStartMinutes,
+  });
+  if (error) throw error;
+
+  return normalizeClientPortalBooking(data);
+}
+
+export async function cancelCurrentClientBooking({ bookingId } = {}, client = null) {
+  client = await resolveClient(client);
+  await getAuthenticatedUserId(client);
+
+  const normalizedBookingId = requireUuidLike(bookingId, "Booking id");
+  const { data, error } = await client.rpc("cancel_client_booking", {
+    booking_id: normalizedBookingId,
+  });
+  if (error) throw error;
+
+  return normalizeClientPortalBooking(data);
 }
 
 export async function loadCurrentClientBookingContext(client = null) {
@@ -465,6 +601,646 @@ export async function ensureCurrentClientBookingAddress({
     isDefault: addresses.length === 0,
     label: addresses.length === 0 ? "Home" : "Saved address",
   }, client);
+}
+
+function minutesToClock(value) {
+  const totalMinutes = Math.max(0, Math.round(Number(value) || 0));
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function formatClientBookingDate(value) {
+  const date = new Date(`${cleanText(value)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return cleanText(value) || "Date pending";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    weekday: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function parsePublicBookingNotes(row = {}, booking = {}) {
+  const rawNotes = cleanText(row.notes);
+  const candidates = [
+    booking.publicNotes,
+    booking.customerNotes,
+    booking.instructions,
+    booking.entryInstructions,
+    booking.additionalNotes,
+  ];
+
+  if (rawNotes) {
+    try {
+      const parsed = JSON.parse(rawNotes);
+      candidates.push(
+        parsed.publicNotes,
+        parsed.customerNotes,
+        parsed.instructions,
+        parsed.entryInstructions,
+        parsed.additionalNotes,
+        parsed.appBooking?.publicNotes,
+        parsed.appBooking?.customerNotes,
+        parsed.appBooking?.instructions,
+        parsed.appBooking?.entryInstructions,
+        parsed.appBooking?.additionalNotes,
+        parsed.appBooking?.notes
+      );
+    } catch {
+      candidates.push(rawNotes);
+    }
+  }
+
+  return candidates
+    .map(cleanText)
+    .find(Boolean) || "";
+}
+
+function parsePublicBookingSessionPreferenceIds(row = {}, booking = {}) {
+  const rawNotes = cleanText(row.notes);
+  const candidates = [booking.sessionPreferenceIds];
+
+  if (rawNotes) {
+    try {
+      const parsed = JSON.parse(rawNotes);
+      candidates.push(parsed.sessionPreferenceIds, parsed.appBooking?.sessionPreferenceIds);
+    } catch {
+      // Legacy plain-text notes do not contain structured preferences.
+    }
+  }
+
+  for (const candidate of candidates) {
+    const normalized = Array.isArray(candidate)
+      ? [...new Set(candidate.map(cleanText).filter(Boolean))]
+      : [];
+    if (normalized.length > 0) return normalized;
+  }
+
+  return [];
+}
+
+function parsePublicBookingSessionPreferenceLabels(row = {}, booking = {}) {
+  const rawNotes = cleanText(row.notes);
+  const candidates = [booking.sessionPreferenceLabels];
+
+  if (rawNotes) {
+    try {
+      const parsed = JSON.parse(rawNotes);
+      candidates.push(parsed.sessionPreferenceLabels, parsed.appBooking?.sessionPreferenceLabels);
+    } catch {
+      // Legacy plain-text notes do not contain structured preference labels.
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    const normalized = normalizeSessionPreferenceSnapshotLabels(candidate);
+    if (normalized.length > 0) return normalized;
+  }
+
+  return [];
+}
+
+export function clientBookingStatusLabel(value = {}) {
+  const status = cleanText(value.status).toLowerCase();
+  const paymentStatus = cleanText(value.paymentStatus).toLowerCase();
+  const combined = `${status} ${paymentStatus}`;
+
+  if (combined.includes("cancel")) return "Cancelled";
+  if (combined.includes("expired")) return "Expired";
+  if (combined.includes("completed")) return "Completed";
+  if (paymentStatus === "paid" || status === "confirmed") return "Confirmed";
+  if (paymentStatus === "awaiting_verification" || status === "pending_payment_verification") {
+    return "I'll confirm once I've checked your payment";
+  }
+  if (
+    status === "payment_method_review"
+    || paymentStatus === "cash_on_arrival"
+    || paymentStatus === "alternative_requested"
+    || paymentStatus === "pending"
+  ) {
+    return "I'll confirm shortly";
+  }
+
+  return status || paymentStatus
+    ? cleanText(status || paymentStatus).replace(/[_-]+/g, " ")
+    : "Pending";
+}
+
+export function clientPaymentMethodLabel(value = "") {
+  const method = cleanText(value).toLowerCase();
+  if (method === "bank_transfer") return "Bank transfer";
+  if (method === "cash" || method === "cash_on_arrival") return "Cash on arrival";
+  if (method === "card") return "Card";
+  if (method === "alternative_requested") return "I'll be in touch about payment";
+  return method ? method.replace(/[_-]+/g, " ") : "Not selected";
+}
+
+function formatClientBookingDateTime(value) {
+  const rawValue = cleanText(value);
+  if (!rawValue) return "";
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function clientCancellationByLabel(value) {
+  const actor = cleanText(value).toLowerCase();
+  if (actor === "client") return "Cancelled by you";
+  if (actor === "admin") return "Cancelled by therapist/admin";
+  return "";
+}
+
+function clientCancellationWindowLabel(value) {
+  const window = cleanText(value).toLowerCase();
+  if (window === "free" || window === "grace") return "Free cancellation";
+  if (window === "late") return "Late cancellation";
+  return "";
+}
+
+export function normalizeClientPortalBooking(row = {}) {
+  const booking = supabaseRowToStorageBooking(row);
+  if (!booking) return null;
+
+  const dateValue = cleanText(row.date || booking.dateValue);
+  const startMinutes = Math.max(0, Math.round(Number(row.start_minutes ?? booking.startMinutes) || 0));
+  const duration = Math.max(0, Math.round(Number(row.duration_minutes ?? booking.duration) || 0));
+  const endMinutes = startMinutes + duration;
+  const status = cleanText(row.status || booking.status) || "confirmed";
+  const paymentStatus = cleanText(row.payment_status || booking.paymentStatus);
+  const services = normalizeSelectionServices(
+    Array.isArray(booking.items) && booking.items.length > 0
+      ? booking.items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          durationMinutes: item.minutes,
+          price: item.price,
+        }))
+      : Array.isArray(row.selected_services) && row.selected_services.length > 0
+        ? row.selected_services
+        : [{
+            id: row.service_id || booking.serviceId || row.service,
+            name: row.service_name || booking.serviceName || row.service,
+            durationMinutes: row.duration_minutes ?? booking.duration,
+            price: row.price ?? booking.price,
+          }]
+  );
+
+  const sessionPreferenceLabelsSnapshot = parsePublicBookingSessionPreferenceLabels(row, booking);
+  const sessionPreferenceIds = normalizeSelectionSessionPreferenceIds(
+    parsePublicBookingSessionPreferenceIds(row, booking),
+    sessionPreferenceLabelsSnapshot
+  );
+  const sessionNotes = cleanText(booking.sessionNotes) || parsePublicBookingNotes(row, booking);
+
+  return {
+    id: cleanText(row.id || booking.id),
+    userId: cleanText(row.user_id || booking.userId),
+    dateValue,
+    time: startMinutes > 0 || endMinutes > 0
+      ? `${minutesToClock(startMinutes)} - ${minutesToClock(endMinutes)}`
+      : "",
+    startMinutes,
+    duration,
+    serviceId: cleanText(row.service_id || booking.serviceId || services[0]?.id),
+    serviceName: cleanText(row.service_name || booking.serviceName || row.service || booking.serviceId),
+    services,
+    address: cleanText(row.address || booking.address),
+    area: cleanText(row.selected_area || booking.location),
+    clientName: cleanText(row.client_name || booking.clientName),
+    customerEmail: cleanText(row.client_email || booking.customerEmail),
+    customerPhone: cleanText(row.client_phone || booking.customerPhone),
+    savedAddressId: cleanText(row.saved_address_id || booking.savedAddressId),
+    bookingReference: cleanText(booking.bookingReference || booking.paymentReference),
+    notes: sessionNotes,
+    sessionNotes,
+    sessionPreferenceIds,
+    sessionPreferenceLabels: sessionPreferenceLabelsSnapshot,
+    sessionPreferences: sessionPreferenceLabels(sessionPreferenceIds, undefined, sessionPreferenceLabelsSnapshot),
+    paymentMethod: cleanText(row.payment_method || booking.paymentMethod),
+    paymentReference: cleanText(booking.paymentReference || booking.bookingReference),
+    price: Math.max(0, Number(row.price ?? booking.price) || 0),
+    status,
+    paymentStatus,
+    cancellationLabel: status === "cancelled" || paymentStatus === "cancelled"
+      ? "Cancelled"
+      : status === "refunded" || paymentStatus === "refunded"
+        ? "Refunded"
+        : status === "no-show"
+          ? "No-show"
+          : status === "expired" || paymentStatus === "expired"
+          ? "Expired"
+            : "",
+    createdAt: cleanText(row.created_at || booking.createdAt),
+    cancelledAt: cleanText(row.cancelled_at || booking.cancelledAt),
+    cancelledBy: cleanText(row.cancelled_by || booking.cancelledBy),
+    cancellationWindow: cleanText(row.cancellation_window || booking.cancellationWindow),
+  };
+}
+
+export function buildClientBookingDetailsViewModel(booking = {}, { userId = "" } = {}) {
+  const requestedUserId = cleanText(userId);
+  if (!requestedUserId || cleanText(booking.userId) !== requestedUserId) return null;
+
+  const paymentStatus = clientBookingStatusLabel({
+    status: "",
+    paymentStatus: booking.paymentStatus,
+  });
+  const statusLabel = clientBookingStatusLabel(booking);
+  const amount = Math.max(0, Number(booking.price) || 0);
+  const paymentMethod = cleanText(booking.paymentMethod);
+  const paymentReference = cleanText(booking.paymentReference || booking.bookingReference);
+
+  return {
+    id: cleanText(booking.id),
+    statusLabel,
+    paymentStatusLabel: paymentStatus === "Pending" ? statusLabel : paymentStatus,
+    bookingReference: cleanText(booking.bookingReference) || "Pending",
+    serviceName: cleanText(booking.serviceName) || "Massage appointment",
+    durationLabel: booking.duration ? `${booking.duration} minutes` : "Duration pending",
+    dateLabel: formatClientBookingDate(booking.dateValue),
+    time: cleanText(booking.time) || "Time pending",
+    area: cleanText(booking.area) || "Area confirmed",
+    address: cleanText(booking.address) || "Address not provided",
+    clientName: cleanText(booking.clientName) || "Name not provided",
+    clientEmail: cleanText(booking.customerEmail) || "Email not provided",
+    clientPhone: cleanText(booking.customerPhone) || "Phone not provided",
+    notes: cleanText(booking.sessionNotes || booking.notes),
+    sessionNotes: cleanText(booking.sessionNotes || booking.notes),
+    sessionPreferences: sessionPreferenceLabels(booking.sessionPreferenceIds, undefined, booking.sessionPreferenceLabels),
+    paymentMethodLabel: clientPaymentMethodLabel(paymentMethod),
+    amount,
+    amountLabel: `£${amount.toFixed(2)}`,
+    paymentReference,
+    confirmationEmail: cleanText(booking.customerEmail) || "Email not provided",
+    cancelledAtLabel: formatClientBookingDateTime(booking.cancelledAt),
+    cancelledByLabel: clientCancellationByLabel(booking.cancelledBy),
+    cancellationWindowLabel: clientCancellationWindowLabel(booking.cancellationWindow),
+    bankTransferRelevant: paymentMethod === "bank_transfer"
+      || cleanText(booking.paymentStatus) === "awaiting_verification"
+      || cleanText(booking.status) === "pending_payment_verification",
+  };
+}
+
+const RESCHEDULE_BLOCKED_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "expired",
+  "completed",
+  "refunded",
+  "no-show",
+  "no_show",
+]);
+
+const RESCHEDULE_ALLOWED_STATUSES = new Set([
+  "confirmed",
+  "pending_payment_verification",
+  "payment_method_review",
+]);
+
+const RESCHEDULE_ALLOWED_PAYMENT_STATUSES = new Set([
+  "",
+  "paid",
+  "payment_received",
+  "confirmed",
+  "awaiting_verification",
+  "pending",
+  "cash_on_arrival",
+  "alternative_requested",
+]);
+
+const RESCHEDULE_CONTACT_MESSAGE = "Online rescheduling is available up to 24 hours before your appointment. Please contact me directly.";
+const CANCELLATION_FREE_MESSAGE = "Your booking can be cancelled free of charge.";
+const CANCELLATION_GRACE_MESSAGE = "Your booking can be cancelled free of charge because it was made less than 1 hour ago.";
+const CANCELLATION_LATE_MESSAGE = "Within 24 hours, the full session fee applies because the time is reserved for you and hard to replace.";
+const CANCELLATION_BLOCKED_MESSAGE = "This booking can no longer be cancelled online.";
+
+function bookingStartDate(booking = {}) {
+  const dateValue = cleanText(booking.dateValue || booking.date);
+  const rawStartMinutes = booking.startMinutes ?? booking.start_minutes;
+  const startMinutes = Number(rawStartMinutes);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return null;
+  if (!Number.isFinite(startMinutes) || startMinutes < 0 || startMinutes >= 24 * 60) return null;
+
+  const appointmentDate = new Date(`${dateValue}T${minutesToClock(startMinutes)}:00`);
+  return Number.isNaN(appointmentDate.getTime()) ? null : appointmentDate;
+}
+
+function bookingCreatedDate(booking = {}) {
+  const rawCreatedAt = cleanText(booking.createdAt || booking.created_at);
+  if (!rawCreatedAt) return null;
+  const createdAt = new Date(rawCreatedAt);
+  return Number.isNaN(createdAt.getTime()) ? null : createdAt;
+}
+
+export function canClientRescheduleBooking(booking = {}, now = new Date(), options = {}) {
+  const currentTime = now instanceof Date && !Number.isNaN(now.getTime()) ? now.getTime() : Date.now();
+  const requestedUserId = cleanText(options.userId);
+  const bookingUserId = cleanText(booking.userId || booking.user_id);
+
+  if (requestedUserId && bookingUserId !== requestedUserId) {
+    return {
+      eligible: false,
+      code: "wrong_client",
+      message: "This booking is not available in your signed-in account.",
+    };
+  }
+
+  const startDate = bookingStartDate(booking);
+  if (!startDate) {
+    return {
+      eligible: false,
+      code: "invalid_date_time",
+      message: "This booking date or time could not be checked. Please contact me directly.",
+    };
+  }
+
+  const normalizedStatus = cleanText(booking.status).toLowerCase() || "confirmed";
+  const normalizedPaymentStatus = cleanText(booking.paymentStatus || booking.payment_status).toLowerCase();
+  const combinedStatus = `${normalizedStatus} ${normalizedPaymentStatus}`;
+
+  const blockedStatus = [...RESCHEDULE_BLOCKED_STATUSES].find((status) => combinedStatus.includes(status));
+  if (blockedStatus) {
+    return {
+      eligible: false,
+      code: blockedStatus.replace(/_/g, "-"),
+      message: "This booking cannot be rescheduled online. Please contact me directly.",
+    };
+  }
+
+  if (
+    !RESCHEDULE_ALLOWED_STATUSES.has(normalizedStatus)
+    || !RESCHEDULE_ALLOWED_PAYMENT_STATUSES.has(normalizedPaymentStatus)
+  ) {
+    return {
+      eligible: false,
+      code: "unsupported_status",
+      message: "This booking cannot be rescheduled online yet. Please contact me directly.",
+    };
+  }
+
+  const appointmentTime = startDate.getTime();
+  if (appointmentTime <= currentTime) {
+    return {
+      eligible: false,
+      code: "past",
+      message: "Past appointments cannot be rescheduled online.",
+    };
+  }
+
+  const hoursUntilAppointment = (appointmentTime - currentTime) / (60 * 60 * 1000);
+  if (hoursUntilAppointment <= 24) {
+    return {
+      eligible: false,
+      code: "within_24_hours",
+      message: RESCHEDULE_CONTACT_MESSAGE,
+    };
+  }
+
+  return {
+    eligible: true,
+    code: "eligible",
+    message: "You can reschedule this appointment online.",
+  };
+}
+
+export function canClientCancelBooking(booking = {}, now = new Date(), options = {}) {
+  const currentTime = now instanceof Date && !Number.isNaN(now.getTime()) ? now.getTime() : Date.now();
+  const requestedUserId = cleanText(options.userId);
+  const bookingUserId = cleanText(booking.userId || booking.user_id);
+
+  if (requestedUserId && bookingUserId !== requestedUserId) {
+    return {
+      eligible: false,
+      code: "wrong_client",
+      cancellationWindow: null,
+      message: "This booking is not available in your signed-in account.",
+    };
+  }
+
+  const startDate = bookingStartDate(booking);
+  if (!startDate) {
+    return {
+      eligible: false,
+      code: "invalid_date_time",
+      cancellationWindow: null,
+      message: "This booking date or time could not be checked. Please contact me directly.",
+    };
+  }
+
+  const normalizedStatus = cleanText(booking.status).toLowerCase() || "confirmed";
+  const normalizedPaymentStatus = cleanText(booking.paymentStatus || booking.payment_status).toLowerCase();
+  const combinedStatus = `${normalizedStatus} ${normalizedPaymentStatus}`;
+  const blockedStatus = [...RESCHEDULE_BLOCKED_STATUSES].find((status) => combinedStatus.includes(status));
+  if (blockedStatus) {
+    return {
+      eligible: false,
+      code: blockedStatus.replace(/_/g, "-"),
+      cancellationWindow: null,
+      message: CANCELLATION_BLOCKED_MESSAGE,
+    };
+  }
+
+  const appointmentTime = startDate.getTime();
+  if (appointmentTime <= currentTime) {
+    return {
+      eligible: false,
+      code: "past",
+      cancellationWindow: null,
+      message: CANCELLATION_BLOCKED_MESSAGE,
+    };
+  }
+
+  const hoursUntilAppointment = (appointmentTime - currentTime) / (60 * 60 * 1000);
+  if (hoursUntilAppointment > 24) {
+    return {
+      eligible: true,
+      code: "eligible",
+      cancellationWindow: "free",
+      message: CANCELLATION_FREE_MESSAGE,
+    };
+  }
+
+  const createdAt = bookingCreatedDate(booking);
+  const withinGracePeriod = createdAt && (currentTime - createdAt.getTime()) < (60 * 60 * 1000);
+  if (withinGracePeriod) {
+    return {
+      eligible: true,
+      code: "eligible",
+      cancellationWindow: "grace",
+      message: CANCELLATION_GRACE_MESSAGE,
+    };
+  }
+
+  return {
+    eligible: true,
+    code: "eligible",
+    cancellationWindow: "late",
+    message: CANCELLATION_LATE_MESSAGE,
+  };
+}
+
+export function buildBookAgainPrefill(booking = {}) {
+  if (!booking || typeof booking !== "object") return null;
+
+  const services = normalizeSelectionServices(
+    Array.isArray(booking.services) && booking.services.length > 0
+      ? booking.services
+      : [{
+          id: booking.serviceId,
+          name: booking.serviceName,
+          durationMinutes: booking.duration,
+        }]
+  );
+  if (services.length === 0) return null;
+
+  const totalDuration = Math.max(
+    0,
+    Math.round(Number(booking.duration) || services.reduce((total, service) => total + service.durationMinutes, 0))
+  );
+
+  return {
+    address: cleanText(booking.address),
+    area: cleanText(booking.area),
+    clientName: cleanText(booking.clientName),
+    customerEmail: cleanText(booking.customerEmail).toLowerCase(),
+    customerPhone: cleanText(booking.customerPhone),
+    savedAddressId: cleanText(booking.savedAddressId) || null,
+    services,
+    serviceId: cleanText(booking.serviceId || services[0]?.id),
+    serviceName: cleanText(booking.serviceName || services[0]?.name),
+    sessionNotes: cleanText(booking.sessionNotes || booking.notes),
+    sessionPreferenceIds: normalizeSelectionSessionPreferenceIds(booking.sessionPreferenceIds, booking.sessionPreferenceLabels),
+    sessionPreferenceLabels: normalizeSessionPreferenceSnapshotLabels(booking.sessionPreferenceLabels),
+    totalDuration,
+  };
+}
+
+function bookingTimestamp(booking) {
+  const date = new Date(`${booking.dateValue || "1970-01-01"}T${minutesToClock(booking.startMinutes || 0)}:00`);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+export function groupClientPortalBookings(bookings = [], now = new Date()) {
+  const nowTime = now instanceof Date && !Number.isNaN(now.getTime()) ? now.getTime() : Date.now();
+  const grouped = {
+    upcoming: [],
+    past: [],
+    cancelled: [],
+  };
+
+  bookings.filter(Boolean).forEach((booking) => {
+    const statusText = `${booking.status || ""} ${booking.paymentStatus || ""}`.toLowerCase();
+    if (
+      booking.cancellationLabel
+      || statusText.includes("cancel")
+      || statusText.includes("expired")
+      || statusText.includes("refund")
+      || statusText.includes("no-show")
+    ) {
+      grouped.cancelled.push(booking);
+      return;
+    }
+
+    if (bookingTimestamp(booking) >= nowTime) {
+      grouped.upcoming.push(booking);
+    } else {
+      grouped.past.push(booking);
+    }
+  });
+
+  grouped.upcoming.sort((left, right) => bookingTimestamp(left) - bookingTimestamp(right));
+  grouped.past.sort((left, right) => bookingTimestamp(right) - bookingTimestamp(left));
+  grouped.cancelled.sort((left, right) => bookingTimestamp(right) - bookingTimestamp(left));
+  return grouped;
+}
+
+function normalizeRecentGuestBookingContext(context = {}) {
+  const bookings = Array.isArray(context.bookings)
+    ? context.bookings.map((booking) => ({
+        id: cleanText(booking?.id),
+        bookingReference: cleanText(booking?.bookingReference || booking?.booking_reference),
+      })).filter((booking) => booking.id && booking.bookingReference)
+    : [];
+
+  return {
+    bookings,
+    customer: {
+      email: cleanText(context.customer?.email).toLowerCase(),
+      name: cleanText(context.customer?.name || context.customer?.fullName),
+      phone: cleanText(context.customer?.phone),
+    },
+    address: cleanText(context.address),
+    area: cleanText(context.area),
+    notes: cleanText(context.notes),
+  };
+}
+
+export function shouldShowPostBookingGoogleSaveCta({ clientSession = null, confirmedAppointments = [] } = {}) {
+  return !clientSession?.user && Array.isArray(confirmedAppointments) && confirmedAppointments.length > 0;
+}
+
+export async function linkRecentGuestBookingToCurrentClient(context = {}, client = null) {
+  client = await resolveClient(client);
+  const { data, error } = await client.auth.getUser();
+  if (error) throw error;
+  const user = data.user;
+  if (!user?.id) throw new Error("A signed-in client is required for this operation.");
+
+  const normalized = normalizeRecentGuestBookingContext(context);
+  if (normalized.bookings.length === 0) {
+    return {
+      linkedBookingIds: [],
+      savedAddress: null,
+      emailMismatch: false,
+      profile: null,
+    };
+  }
+
+  const existingProfile = await getCurrentClientProfile(client).catch(() => null);
+  const profileInput = profileInputFromAuthUser(user, existingProfile, normalized.customer.phone);
+  if (normalized.customer.name) {
+    profileInput.fullName = normalized.customer.name;
+  }
+
+  const profile = await upsertCurrentClientProfile(profileInput, client);
+  const savedAddress = normalized.address
+    ? await ensureCurrentClientBookingAddress({
+        addressLine1: normalized.address,
+        area: normalized.area,
+        instructions: normalized.notes,
+      }, client)
+    : null;
+
+  const { data: linkedBookingIds, error: linkError } = await client.rpc(
+    "link_recent_guest_booking_to_client",
+    {
+      link_payload: {
+        bookings: normalized.bookings.map((booking) => ({
+          id: booking.id,
+          booking_reference: booking.bookingReference,
+        })),
+        saved_address_id: savedAddress?.id || null,
+      },
+    }
+  );
+  if (linkError) throw linkError;
+
+  const authEmail = cleanText(user.email).toLowerCase();
+  const bookingEmail = normalized.customer.email;
+  const emailMismatch = Boolean(authEmail && bookingEmail && authEmail !== bookingEmail);
+
+  return {
+    linkedBookingIds: Array.isArray(linkedBookingIds) ? linkedBookingIds : [],
+    savedAddress,
+    emailMismatch,
+    profile,
+  };
 }
 
 export async function updateCurrentClientBookingDefaults({

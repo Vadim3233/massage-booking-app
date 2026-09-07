@@ -1,0 +1,20 @@
+export const STORAGE_VERSION = 1;
+
+export const BOOKINGS_STORAGE_KEY = "chainScheduler.bookings";
+export const WAITLIST_STORAGE_KEY = "chainScheduler.waitlistEntries";
+export const ENHANCEMENTS_STORAGE_KEY = "chainScheduler.enhancements";
+export const COVERAGE_ZONES_STORAGE_KEY = "chainScheduler.coverageZones";
+export const SERVICES_STORAGE_KEY = "chainScheduler.services";
+export const SERVICE_DETAILS_STORAGE_KEY = "chainScheduler.serviceDetails";
+export const SERVICE_CATALOGUE_MIGRATION_KEY = "chainScheduler.serviceCatalogueMigration";
+export const WEEKLY_WORKING_SCHEDULE_STORAGE_KEY = "chainScheduler.weeklyWorkingSchedule";
+export const SERVICE_AREAS_STORAGE_KEY = "chainScheduler.serviceAreas";
+export const SESSION_PREFERENCES_STORAGE_KEY = "chainScheduler.sessionPreferences";
+export const FINANCIAL_SETTINGS_STORAGE_KEY = "chainScheduler.financialSettings";
+export const EXPENSES_STORAGE_KEY = "chainScheduler.expenses";
+export const CLIENT_NOTES_STORAGE_KEY = "chainScheduler.clientNotes";
+export const CLIENT_PROFILES_STORAGE_KEY = "chainScheduler.clientProfiles";
+export const DOCUMENT_SETTINGS_STORAGE_KEY = "chainScheduler.documentSettings";
+export const RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY = "chainScheduler.recentGuestBookingContext";
+export const BOOKING_HOLD_CLIENT_KEY_STORAGE_KEY = "chainScheduler.bookingHoldClientKey";
+export const RECENT_GUEST_BOOKING_CONTEXT_TTL_MS = 2 * 60 * 60 * 1000;

@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import {
+  CLIENT_MINIMUM_BOOKING_NOTICE_MINUTES,
   DEFAULT_DAY_SETTINGS,
+  DEFAULT_SERVICES,
+  addDaysToPlainDateValue,
+  dateValueInTimeZone,
+  filterClientBookableSlots,
   getSchedulingPreview,
   minutesToTime,
+  minutesInTimeZone,
+  normalizePlainDateValue,
   timeToMinutes,
 } from "./schedulingEngine.js";
 
@@ -19,6 +26,37 @@ const baseSettings = {
   workingStart: "09:00",
   workingEnd: "18:00",
 };
+
+assert.equal(normalizePlainDateValue("2026-07-18"), "2026-07-18");
+assert.equal(
+  dateValueInTimeZone(new Date("2026-07-17T23:30:00.000Z")),
+  "2026-07-18",
+  "London local date must not shift one day backward near midnight",
+);
+assert.equal(addDaysToPlainDateValue("2026-07-18", 1), "2026-07-19");
+assert.equal(addDaysToPlainDateValue("2026-03-29", 1), "2026-03-30");
+assert.equal(
+  dateValueInTimeZone(new Date("2026-03-29T01:30:00.000Z")),
+  "2026-03-29",
+  "London DST start keeps the selected calendar date",
+);
+assert.equal(
+  minutesInTimeZone(new Date("2026-03-29T01:30:00.000Z")),
+  150,
+  "London DST start converts 01:30Z to 02:30 local",
+);
+assert.equal(
+  dateValueInTimeZone(new Date("2026-10-25T01:30:00.000Z")),
+  "2026-10-25",
+  "London DST end keeps the selected calendar date",
+);
+
+assert.deepEqual(DEFAULT_SERVICES.map((service) => service.id), [
+  "massage",
+  "assisted-stretching",
+  "soft-tissue-therapy",
+  "body-exam",
+]);
 
 const existingBookings = [
   {
@@ -38,6 +76,22 @@ const existingBookings = [
     travelBuffer: 45,
   },
 ];
+
+{
+  const preview = getSchedulingPreview({
+    settings: { ...baseSettings, mode: "optimized", workingStart: "08:00" },
+    bookings: existingBookings,
+    minimumStartMinutes: timeToMinutes("14:09"),
+    requestedDuration: 60,
+    requestedTravelBuffer: 60,
+  });
+  const filteredToday = filterClientBookableSlots(preview.slots, "2026-07-18", {
+    minimumNoticeMinutes: CLIENT_MINIMUM_BOOKING_NOTICE_MINUTES,
+    now: new Date("2026-07-18T10:59:00.000Z"),
+  });
+
+  assert(startTimes(filteredToday).includes("14:30"), "Same-day optimized mode offers a later slot once the chain edge is inside 2 hours");
+}
 
 {
   const preview = getSchedulingPreview({
@@ -77,6 +131,54 @@ const existingBookings = [
   assert.equal(preview.slots[0].label, "first booking option");
   assert.equal(minutesToTime(preview.slots[0].start), "09:00");
   assert.equal(minutesToTime(preview.slots.at(-1).start), "13:00");
+}
+
+{
+  const preview = getSchedulingPreview({
+    settings: { ...baseSettings, mode: "flexible" },
+    bookings: [],
+    requestedDuration: 60,
+    requestedTravelBuffer: 60,
+  });
+  const filteredToday = filterClientBookableSlots(preview.slots, "2026-07-18", {
+    now: new Date("2026-07-18T11:04:00.000Z"),
+  });
+
+  assert(!startTimes(filteredToday).includes("09:00"), "Today past slots are unavailable");
+  assert(!startTimes(filteredToday).includes("11:00"), "The current in-progress half-hour is unavailable");
+  assert(startTimes(filteredToday).includes("12:30"), "Today future slots remain available");
+}
+
+{
+  const preview = getSchedulingPreview({
+    settings: { ...baseSettings, mode: "flexible" },
+    bookings: [],
+    requestedDuration: 60,
+    requestedTravelBuffer: 60,
+  });
+  const filteredToday = filterClientBookableSlots(preview.slots, "2026-07-18", {
+    minimumNoticeMinutes: CLIENT_MINIMUM_BOOKING_NOTICE_MINUTES,
+    now: new Date("2026-07-18T11:04:00.000Z"),
+  });
+
+  assert(!startTimes(filteredToday).includes("12:30"), "Today slots inside 2 hours are unavailable");
+  assert(startTimes(filteredToday).includes("14:30"), "Today slots at least 2 hours ahead remain available");
+}
+
+{
+  const preview = getSchedulingPreview({
+    settings: { ...baseSettings, mode: "flexible" },
+    bookings: [],
+    requestedDuration: 60,
+    requestedTravelBuffer: 60,
+  });
+  const tomorrowDate = addDaysToPlainDateValue("2026-07-18", 1);
+  const filteredTomorrow = filterClientBookableSlots(preview.slots, tomorrowDate, {
+    now: new Date("2026-07-18T11:04:00.000Z"),
+  });
+
+  assert.equal(tomorrowDate, "2026-07-19");
+  assert(startTimes(filteredTomorrow).includes("09:00"), "Tomorrow's early slots remain unchanged");
 }
 
 {

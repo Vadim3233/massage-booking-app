@@ -3,6 +3,7 @@ import transactionalEmailsHandler from "../../api/transactional-emails.js";
 import internalTransactionalEmailsHandler from "../../api/internal-transactional-emails.js";
 import telegramNotificationsHandler from "../../api/telegram-notifications.js";
 import telegramTestHandler from "../../api/telegram-test.js";
+import telegramWebhookHandler from "../../api/telegram-webhook.js";
 
 function createMockResponse() {
   const res = { _status: 200, _headers: {}, _body: null };
@@ -32,6 +33,7 @@ async function run() {
   process.env.FRONTEND_ORIGIN = "http://127.0.0.1:5173";
   process.env.NODE_ENV = "production";
   process.env.EMAIL_PROVIDER = "resend";
+  process.env.TELEGRAM_WEBHOOK_SECRET = "telegram-secret";
 
   const originalFetch = global.fetch;
   global.fetch = async () => ({
@@ -157,6 +159,32 @@ async function run() {
       await telegramNotificationsHandler({ ...requestBase }, overLimitResponse);
       assert.equal(overLimitResponse._status, 429);
       assert.equal(overLimitResponse._body.error, "Too many Telegram notification requests");
+    }
+
+    // Telegram webhook requires Telegram's secret token in production.
+    {
+      const request = createMockRequest({
+        headers: {},
+        body: { message: { text: "/start VDM-TEST", chat: { id: 123 } } },
+      });
+      const response = createMockResponse();
+
+      await telegramWebhookHandler(request, response);
+      assert.equal(response._status, 403);
+      assert.equal(response._body.linked, false);
+      assert.equal(response._body.error, "Forbidden");
+    }
+
+    {
+      const request = createMockRequest({
+        method: "GET",
+        headers: { "x-telegram-bot-api-secret-token": "telegram-secret" },
+      });
+      const response = createMockResponse();
+
+      await telegramWebhookHandler(request, response);
+      assert.equal(response._status, 405);
+      assert.equal(response._body.linked, false);
     }
 
     console.log("API secret protection tests passed.");

@@ -20,3 +20,6 @@ crash*
 qa-*.png
 .DS_Store
 Thumbs.db
+
+database-backups/
+supabase/.temp/

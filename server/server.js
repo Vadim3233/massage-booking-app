@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { sendTransactionalEmail } from "./emailProvider.js";
 import { isAllowedTelegramEventType, sendAdminTelegramNotification, sendTelegramTestMessage } from "./telegramProvider.js";
+import { hasValidTelegramWebhookSecret, linkTelegramStartUpdate } from "./telegramWebhook.js";
 
 function loadLocalEnv() {
   const envPath = resolve(process.cwd(), ".env.local");
@@ -99,8 +100,13 @@ async function sendTelegramTestWithFallback() {
     return localResult;
   }
 
-  const remoteResponse = await fetch(`${REMOTE_API_BASE_URL.replace(/\/$/, "")}/api/telegram-test`, {
-    headers: { "Content-Type": "application/json" },
+  const remoteApiBase = REMOTE_API_BASE_URL.replace(/\/$/, "");
+  const remoteOrigin = new URL(remoteApiBase).origin;
+  const remoteResponse = await fetch(`${remoteApiBase}/api/telegram-test`, {
+    headers: {
+      "Content-Type": "application/json",
+      Origin: remoteOrigin,
+    },
     method: "POST",
     body: JSON.stringify({ source: "local-dev-proxy" }),
   });
@@ -259,6 +265,25 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 400, {
         error: error instanceof Error ? error.message : "Unable to send Telegram test message",
         sent: false,
+      });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/api/telegram-webhook") {
+    try {
+      if (!hasValidTelegramWebhookSecret(request)) {
+        sendJson(response, 403, { error: "Forbidden", linked: false });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const result = await linkTelegramStartUpdate(body);
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 400, {
+        error: error instanceof Error ? error.message : "Telegram webhook failed",
+        linked: false,
       });
     }
     return;

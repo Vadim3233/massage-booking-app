@@ -19,6 +19,10 @@ export function AdminLogin({
   const [localError, setLocalError] = useState("");
   const message = localError || authError;
 
+  if (session && !passwordRecovery && !authLoading) {
+    return null;
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
@@ -163,4 +167,3 @@ export function AdminLogin({
     </section>
   );
 }
-

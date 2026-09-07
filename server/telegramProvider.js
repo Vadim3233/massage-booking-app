@@ -1,3 +1,5 @@
+import { sessionPreferenceLabels } from "../src/lib/sessionPreferences.js";
+
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
 export const TELEGRAM_EVENT_TYPES = new Set([
@@ -51,6 +53,18 @@ function formatDateTime(value) {
 
 function formatLine(label, value) {
   return `${label}: ${compact(value)}`;
+}
+
+function bookingPreferenceLines(booking = {}) {
+  const labels = Array.isArray(booking.sessionPreferences) && booking.sessionPreferences.length > 0
+    ? booking.sessionPreferences.map((label) => String(label || "").trim()).filter(Boolean)
+    : sessionPreferenceLabels(booking.sessionPreferenceIds);
+  const note = String(booking.sessionNotes || "").trim();
+
+  return [
+    labels.length > 0 ? formatLine("Session preferences", labels.join(", ")) : null,
+    note ? formatLine("Client note", note) : null,
+  ];
 }
 
 function formatFee(label, value) {
@@ -151,6 +165,7 @@ export function buildAdminTelegramMessage(type, payload = {}) {
         booking.paymentStatus || payload.paymentStatus,
         booking.status || payload.bookingStatus
       )),
+      ...bookingPreferenceLines(booking),
       formatLine("Reservation Expires", formatDateTime(booking.paymentHoldExpiresAt || payload.paymentHoldExpiresAt)),
       formatLine("Booking ID", booking.id || payload.bookingId),
       booking.orderId ? formatLine("Order ID", booking.orderId) : null,
@@ -205,6 +220,7 @@ export function buildAdminTelegramMessage(type, payload = {}) {
       )),
       formatLine("Method", (payload.paymentMethod || booking.paymentMethod || "Not provided")),
       formatLine("Reservation Expires", formatDateTime(booking.paymentHoldExpiresAt || payload.paymentHoldExpiresAt)),
+      booking.paymentReceivedAt || payload.paymentReceivedAt ? formatLine("Payment Received", formatDateTime(booking.paymentReceivedAt || payload.paymentReceivedAt)) : null,
     ]);
   }
 

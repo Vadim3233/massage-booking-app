@@ -1,6 +1,15 @@
 export const VALID_DURATIONS = [60, 90, 120, 150, 180, 210, 240];
 export const DEFAULT_TRAVEL_BUFFER = 60;
 export const SLOT_INCREMENT = 30;
+export const CLIENT_BOOKING_TIME_ZONE = "Europe/London";
+export const CLIENT_MINIMUM_BOOKING_NOTICE_MINUTES = 120;
+
+export function roundUpToSlotIncrement(minutes, increment = SLOT_INCREMENT) {
+  const numericMinutes = Number(minutes);
+  const numericIncrement = Math.max(1, Number(increment) || SLOT_INCREMENT);
+  if (!Number.isFinite(numericMinutes)) return 0;
+  return Math.ceil(numericMinutes / numericIncrement) * numericIncrement;
+}
 
 // Strict duration validation - only allow durations in VALID_DURATIONS
 export function isValidDuration(duration) {
@@ -9,11 +18,10 @@ export function isValidDuration(duration) {
 }
 
 export const DEFAULT_SERVICES = [
-  { id: "deep-tissue", name: "Deep Tissue Recovery", visible: true },
-  { id: "sports", name: "Performance Sports Massage", visible: true },
-  { id: "head-massage", name: "Cloud Nine Head Massage", visible: true },
-  { id: "prenatal", name: "Prenatal Wellness", visible: true },
-  { id: "zero-gravity", name: "The Zero-Gravity Melt", visible: true },
+  { id: "massage", name: "Massage", visible: true },
+  { id: "assisted-stretching", name: "Assisted Stretching", visible: true },
+  { id: "soft-tissue-therapy", name: "Soft Tissue Therapy", visible: true },
+  { id: "body-exam", name: "Body Exam", visible: true },
 ];
 
 export const DEFAULT_DAY_SETTINGS = {
@@ -24,6 +32,8 @@ export const DEFAULT_DAY_SETTINGS = {
   startMode: "flexible",
   fixedStart: "10:00",
   releaseTime: "11:00",
+  customWorkingHours: false,
+  unavailable: false,
 };
 
 export function timeToMinutes(time) {
@@ -36,6 +46,103 @@ export function minutesToTime(totalMinutes) {
   const hours = Math.floor(safeMinutes / 60);
   const minutes = safeMinutes % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function datePartsInTimeZone(date, timeZone = CLIENT_BOOKING_TIME_ZONE) {
+  const sourceDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+    minute: "2-digit",
+    month: "2-digit",
+    timeZone,
+    year: "numeric",
+  }).formatToParts(sourceDate);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+export function dateValueInTimeZone(date = new Date(), timeZone = CLIENT_BOOKING_TIME_ZONE) {
+  const parts = datePartsInTimeZone(date, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function minutesInTimeZone(date = new Date(), timeZone = CLIENT_BOOKING_TIME_ZONE) {
+  const parts = datePartsInTimeZone(date, timeZone);
+  return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+export function normalizePlainDateValue(value) {
+  const match = String(value || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+
+  const [, year, month, day] = match;
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31) return "";
+
+  const utcDate = new Date(Date.UTC(Number(year), monthNumber - 1, dayNumber));
+  if (
+    utcDate.getUTCFullYear() !== Number(year) ||
+    utcDate.getUTCMonth() !== monthNumber - 1 ||
+    utcDate.getUTCDate() !== dayNumber
+  ) {
+    return "";
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+export function addDaysToPlainDateValue(dateValue, days) {
+  const safeValue = normalizePlainDateValue(dateValue);
+  if (!safeValue) return "";
+  const [year, month, day] = safeValue.split("-").map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+  return [
+    utcDate.getUTCFullYear(),
+    String(utcDate.getUTCMonth() + 1).padStart(2, "0"),
+    String(utcDate.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+export function daysBetweenPlainDateValues(startDateValue, endDateValue) {
+  const safeStart = normalizePlainDateValue(startDateValue);
+  const safeEnd = normalizePlainDateValue(endDateValue);
+  if (!safeStart || !safeEnd) return 0;
+  const [startYear, startMonth, startDay] = safeStart.split("-").map(Number);
+  const [endYear, endMonth, endDay] = safeEnd.split("-").map(Number);
+  const startTime = Date.UTC(startYear, startMonth - 1, startDay);
+  const endTime = Date.UTC(endYear, endMonth - 1, endDay);
+  return Math.round((endTime - startTime) / 86400000);
+}
+
+export function isClientSlotStillBookable({
+  dateValue,
+  minimumNoticeMinutes = 0,
+  now = new Date(),
+  startMinutes,
+  timeZone = CLIENT_BOOKING_TIME_ZONE,
+}) {
+  const safeDateValue = normalizePlainDateValue(dateValue);
+  const numericStart = Number(startMinutes);
+  if (!safeDateValue || !Number.isFinite(numericStart)) return false;
+
+  const currentDateValue = dateValueInTimeZone(now, timeZone);
+  if (safeDateValue < currentDateValue) return false;
+  if (safeDateValue > currentDateValue) return true;
+
+  return numericStart >= minutesInTimeZone(now, timeZone) + Math.max(0, Number(minimumNoticeMinutes) || 0);
+}
+
+export function filterClientBookableSlots(slots, dateValue, options = {}) {
+  return (Array.isArray(slots) ? slots : []).filter((slot) =>
+    isClientSlotStillBookable({
+      ...options,
+      dateValue,
+      startMinutes: slot?.start,
+    })
+  );
 }
 
 export function normalizeBooking(booking) {
@@ -142,7 +249,7 @@ export function getFlexibleSlots({ settings, bookings, requestedDuration, reques
   return slots;
 }
 
-export function getOptimizedSlots({ settings, bookings, requestedDuration, requestedTravelBuffer }) {
+export function getOptimizedSlots({ settings, bookings, minimumStartMinutes = 0, requestedDuration, requestedTravelBuffer }) {
   const flow = getFlow(bookings);
 
   if (!flow.hasBookings) {
@@ -173,7 +280,7 @@ export function getOptimizedSlots({ settings, bookings, requestedDuration, reque
   }
 
   const beforeStart = flow.flowStart - (requestedDuration + requestedTravelBuffer);
-  const afterStart = flow.flowEnd;
+  const afterStart = Math.max(flow.flowEnd, roundUpToSlotIncrement(minimumStartMinutes));
 
   return [
     makeSlot(
@@ -197,10 +304,18 @@ export function getOptimizedSlots({ settings, bookings, requestedDuration, reque
   ].filter((slot) => slot.valid);
 }
 
-export function getSchedulingPreview({ settings, bookings, requestedDuration, requestedTravelBuffer }) {
+export function getSchedulingPreview({ settings, bookings, minimumStartMinutes = 0, requestedDuration, requestedTravelBuffer }) {
   const duration = Number(requestedDuration);
   const travelBuffer = Math.max(0, Number(requestedTravelBuffer));
   const flow = getFlow(bookings);
+
+  if (settings.unavailable) {
+    return {
+      flow,
+      slots: [],
+      warnings: ["This day is marked unavailable."],
+    };
+  }
 
   if (!isValidDuration(duration)) {
     return {
@@ -211,7 +326,7 @@ export function getSchedulingPreview({ settings, bookings, requestedDuration, re
   }
 
   const slots = settings.mode === "optimized"
-    ? getOptimizedSlots({ settings, bookings, requestedDuration: duration, requestedTravelBuffer: travelBuffer })
+    ? getOptimizedSlots({ settings, bookings, minimumStartMinutes, requestedDuration: duration, requestedTravelBuffer: travelBuffer })
     : getFlexibleSlots({ settings, bookings, requestedDuration: duration, requestedTravelBuffer: travelBuffer });
 
   return {
