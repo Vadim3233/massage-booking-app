@@ -28,11 +28,11 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
   assert.ok(helperIndex < confirmationIndex, "Client confirmation flow should be able to call the helper");
 }
 
-// Test 0b: Public booking availability and holds do not depend on persisted auth sessions.
+// Test 0b: Availability remains public; Stage 2 hold mutations use authenticated sessions.
 {
   assert.match(appSource, /async function loadPublicAvailabilityFromSupabase\(days\) {\s*const supabase = await getPublicSupabaseClient\(\);/);
-  assert.match(appSource, /async function createBookingHoldInSupabase\(\{ dateValue, slot \}\) {\s*const supabase = await getPublicSupabaseClient\(\);/);
-  assert.match(appSource, /async function releaseBookingHoldInSupabase\(hold\) {[\s\S]*const supabase = await getPublicSupabaseClient\(\);/);
+  assert.match(appSource, /async function createBookingHoldInSupabase\(\{ dateValue, slot \}\) {\s*const supabase = await getSupabaseClient\(\);/);
+  assert.match(appSource, /async function releaseBookingHoldInSupabase\(hold\) {[\s\S]*const supabase = await getSupabaseClient\(\);/);
 }
 
 // Test 0c: Public client enhancements use the persisted catalogue and omit hidden entries.
@@ -162,12 +162,13 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
   const myBookingsSource = readFileSync(new URL("./components/Client/MyBookingsPanel.jsx", import.meta.url), "utf8");
   const supabaseClientSource = readFileSync(new URL("./supabaseClient.js", import.meta.url), "utf8");
 
-  assert.match(supabaseClientSource, /export async function signInClientWithEmail\(email, redirectTo\)/);
+  assert.match(supabaseClientSource, /export async function signInClientWithEmail\(email, redirectTo, \{ shouldCreateUser = false \} = \{\}\)/);
+  assert.match(supabaseClientSource, /emailRedirectTo: redirectTo, shouldCreateUser/);
   assert.match(supabaseClientSource, /supabase\.auth\.signInWithOtp/);
   assert.match(clientAccountSource, /export function ClientEmailSignInForm/);
   assert.match(clientAccountSource, /Email me a sign-in link/);
   assert.match(clientAccountSource, /Continue with Google/);
-  assert.match(clientAccountSource, /You can also continue as a guest/);
+  assert.match(clientAccountSource, /New bookings require approved client access/);
   assert.match(myBookingsSource, /<ClientEmailSignInForm onEmailLogin=\{onEmailLogin\} signingIn=\{signingIn\} \/>/);
   assert.match(appSource, /async function handleClientEmailLogin\(email\)/);
   assert.match(appSource, /friendlyClientAuthError\(error, "Google sign-in is not enabled yet/);

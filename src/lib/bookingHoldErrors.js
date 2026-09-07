@@ -1,3 +1,5 @@
+import { clientAccessErrorMessage } from "./clientAccess.js";
+
 export const CLIENT_BOOKING_LIMIT_MESSAGES = {
   advanceLimit: "Online appointments can currently be arranged up to 40 days ahead. Please choose an earlier date.",
   minimumNotice: "Online appointments need at least 2 hours notice. Please choose a later time.",
@@ -9,6 +11,8 @@ export const BOOKING_SYSTEM_UPDATE_REQUIRED_MESSAGE =
   "I can't reserve this time because the booking system needs the latest database update. Please contact me directly while I finish the update.";
 
 export function bookingHoldErrorMessage(error) {
+  const accessMessage = clientAccessErrorMessage(error);
+  if (accessMessage) return accessMessage;
   const message = String(error?.message || error || "").trim();
   const normalizedMessage = message.toLowerCase();
   if (

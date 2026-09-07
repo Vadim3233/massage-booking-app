@@ -108,9 +108,9 @@ returns table (
 )
 language sql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 stable
-as $$
+as $get_public_booking_blocks$
   select
     b.id as booking_id,
     b.date,
@@ -118,8 +118,9 @@ as $$
     b.duration_minutes,
     coalesce(nullif(b.notes::jsonb #>> '{appBooking,travelBuffer}', '')::integer, 60) as buffer_minutes
   from public.bookings b
-  where b.status = 'confirmed'
-    and b.date between start_date and end_date
+  where b.date between start_date and end_date
+    and coalesce(b.status, '') not in ('cancelled', 'canceled', 'expired', 'rejected', 'refunded', 'completed', 'no-show', 'no_show')
+    and coalesce(b.payment_status, '') not in ('cancelled', 'canceled', 'expired', 'rejected', 'refunded')
   union all
   select
     h.id as booking_id,
@@ -128,10 +129,11 @@ as $$
     h.duration_minutes,
     h.buffer_minutes
   from public.booking_holds h
-  where h.expires_at > now()
-    and h.date between start_date and end_date
+  where h.date between start_date and end_date
+    and h.expires_at > now()
+    and h.released_at is null
   order by 2, 3;
-$$;
+$get_public_booking_blocks$;
 
 create or replace function public.create_booking_hold(
   hold_date date,
@@ -149,10 +151,24 @@ security definer
 set search_path = public
 as $$
 declare
+  minimum_notice_minutes constant integer := 120;
+  london_today date := (now() at time zone 'Europe/London')::date;
+  london_now_minutes integer := (
+    extract(hour from now() at time zone 'Europe/London')::integer * 60
+    + extract(minute from now() at time zone 'Europe/London')::integer
+  );
   hold_end integer := hold_start_minutes + hold_duration_minutes + hold_buffer_minutes;
 begin
   delete from public.booking_holds as expired_holds
   where expired_holds.expires_at <= now();
+
+  if hold_date < london_today then
+    raise exception 'Booking hold date cannot be in the past.';
+  end if;
+
+  if hold_date = london_today and hold_start_minutes < london_now_minutes + minimum_notice_minutes then
+    raise exception 'Online appointments need at least 2 hours notice. Please choose a later time.';
+  end if;
 
   if exists (
     select 1

@@ -51,10 +51,10 @@ assert.match(
   /export async function getPublicSupabaseClient/,
   "booking helpers should expose a stateless public Supabase client"
 );
-assert.match(
+assert.doesNotMatch(
   bookingSupabaseSource,
-  /usesPrivateClientRecord \? await getSupabaseClient\(\) : await getPublicSupabaseClient\(\)/,
-  "guest booking saves should avoid stale persisted auth refreshes"
+  /usesPrivateClientRecord|await getPublicSupabaseClient\(\)/,
+  "booking mutations must never select anonymous credentials because ownership fields are missing"
 );
 
 const sampleBooking = {

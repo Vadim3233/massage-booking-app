@@ -36,6 +36,8 @@ npm run api
 
 Email provider keys stay in environment variables. Copy `.env.example` into your local environment setup and set either `RESEND_API_KEY` or `SENDGRID_API_KEY`. The default sender placeholder is `bookings@mydomain.com`.
 
+Bank-transfer details are configured with both public frontend variables and server email variables. Set `VITE_BANK_ACCOUNT_NAME`, `VITE_BANK_NAME`, `VITE_BANK_SORT_CODE`, and `VITE_BANK_ACCOUNT_NUMBER` for client-facing screens, then set matching `BANK_ACCOUNT_NAME`, `BANK_NAME`, `BANK_SORT_CODE`, and `BANK_ACCOUNT_NUMBER` for server-rendered emails. Real bank details belong in local or Vercel environment configuration and must not be committed.
+
 Run the pure scheduling-engine checks:
 
 ```bash

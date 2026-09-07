@@ -1,0 +1,24 @@
+.client-access-page { max-width: 520px; margin: 32px auto; padding: 24px; color: #17211b; font-family: Inter, sans-serif; overflow-wrap: anywhere; }
+.client-access-page h1 { font-family: 'Playfair Display', serif; font-size: clamp(26px, 5vw, 34px); line-height: 1.2; }
+.client-access-brand, .client-access-muted { color: #69766e; font-size: 14px; }
+.client-access-page form, .client-access-page label { display: grid; gap: 8px; }
+.client-access-page form { gap: 18px; margin: 20px 0; }
+.client-access-page input, .client-access-page textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 12px; border: 1px solid #ded3bf; border-radius: 8px; font: inherit; }
+.client-access-page button, .client-access-primary { display: inline-block; padding: 12px 16px; margin: 4px 8px 4px 0; min-height: 44px; border: 1px solid #ded3bf; border-radius: 8px; background: #fffaf0; color: #344f3c; font: inherit; cursor: pointer; }
+.client-access-page button:disabled { opacity: .6; cursor: wait; }
+.client-access-page a { color: #344f3c; }
+.client-access-actions { display: flex; flex-wrap: wrap; margin-top: 24px; }
+.client-access-admin { max-width: 960px; }
+.client-access-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.client-access-tabs button[aria-current="page"] { border-color: #344f3c; background: #344f3c; color: white; }
+.client-access-record { padding: 18px 0; border-bottom: 1px solid #ded3bf; }
+.client-access-record dl { display: grid; grid-template-columns: minmax(100px, 1fr) 2fr; gap: 8px; }
+.client-access-record dd { margin: 0; }
+.client-access-confirm { border: 1px solid #ded3bf; padding: 16px; margin: 16px 0; background: #fffaf0; }
+.legal-notice-page { max-width: 760px; line-height: 1.65; }
+.legal-notice-page h2 { margin: 28px 0 8px; font-family: 'Playfair Display', serif; font-size: 22px; }
+.legal-notice-page li + li { margin-top: 6px; }
+.legal-page-links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 28px; }
+.privacy-footer { padding: 18px 16px 28px; text-align: center; font: 14px Inter, sans-serif; }
+.privacy-footer a { color: #344f3c; }
+@media (max-width: 520px) { .client-access-page { margin: 12px auto; padding: 16px; } }

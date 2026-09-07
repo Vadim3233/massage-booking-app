@@ -155,6 +155,9 @@ import {
 } from "./lib/weeklyWorkingSchedule.js";
 import { buildTelegramStartUrl, normalizeTelegramBotUrl } from "./lib/telegramLinks.js";
 import { ClientEmailSignInForm } from "./components/Client/ClientAccountPanel.jsx";
+import { ClientOnboarding } from "./components/Client/ClientOnboarding.jsx";
+import { useClientBookingAccess } from "./hooks/useClientBookingAccess.js";
+import { clientAccessErrorMessage, requireClientBookingAccess } from "./lib/clientAccess.js";
 import { MyBookingsPanel } from "./components/Client/MyBookingsPanel.jsx";
 import { AdminLogin } from "./components/Admin/AdminLogin.jsx";
 import {
@@ -306,11 +309,11 @@ function friendlyClientAuthError(error, fallback) {
   const lowerMessage = message.toLowerCase();
 
   if (lowerMessage.includes("unsupported provider") || lowerMessage.includes("provider is not enabled")) {
-    return "Google sign-in is not enabled yet. Please use email sign-in or continue as a guest.";
+    return "Google sign-in is not enabled yet. Please use email sign-in.";
   }
 
   if (lowerMessage.includes("email") && lowerMessage.includes("not enabled")) {
-    return "Email sign-in is not enabled yet. You can still continue as a guest.";
+    return "Email sign-in is not enabled yet. Please contact Vad for help signing in.";
   }
 
   return fallback || message || "Sign-in could not be started.";
@@ -720,7 +723,7 @@ async function createOrderInSupabase(order) {
 
   if (error) {
     logBookingConfirmation("create_secure_order failed", error);
-    throw new Error(`Could not create the checkout order: ${error.message}`);
+    throw new Error(clientAccessErrorMessage(error) || `Could not create the checkout order: ${error.message}`);
   }
   logBookingConfirmation("create_secure_order succeeded");
   return data;
@@ -785,7 +788,7 @@ async function loadPublicAvailabilityFromSupabase(days) {
 }
 
 async function createBookingHoldInSupabase({ dateValue, slot }) {
-  const supabase = await getPublicSupabaseClient();
+  const supabase = await getSupabaseClient();
   const clientKey = getBookingHoldClientKey();
   const holdDateValue = normalizePlainDateValue(dateValue);
   if (!holdDateValue) {
@@ -807,7 +810,7 @@ async function createBookingHoldInSupabase({ dateValue, slot }) {
       throw new Error(BOOKING_HOLD_UNAVAILABLE_MESSAGE);
     }
 
-    throw new Error(`Could not hold this time: ${error.message}`);
+    throw new Error(clientAccessErrorMessage(error) || `Could not hold this time: ${error.message}`);
   }
 
   const hold = Array.isArray(data) ? data[0] : data;
@@ -827,7 +830,7 @@ async function releaseBookingHoldInSupabase(hold) {
   if (hold?.previewOnly) return;
   if (!hold?.id || !hold?.token) return;
 
-  const supabase = await getPublicSupabaseClient();
+  const supabase = await getSupabaseClient();
   const { error } = await supabase.rpc("release_booking_hold", {
     release_client_key: getBookingHoldClientKey(),
     release_hold_id: hold.id,
@@ -1372,6 +1375,7 @@ function ClientBookingInterface({
   onClientStepChange,
 }) {
   const showLocalPreviewControls = import.meta.env.DEV;
+  const bookingAccess = useClientBookingAccess(clientSession?.user?.id || null, clientAuthLoading);
   const initialClientStep = (() => {
     if (typeof window === "undefined") return "location";
     const requestedStep = new URLSearchParams(window.location.search).get("clientStep");
@@ -2307,7 +2311,8 @@ function ClientBookingInterface({
     });
   }
 
-  function continueToCheckoutDetails() {
+  async function continueToCheckoutDetails() {
+    if (!isMobilePreviewFrame && !await bookingAccess.refresh()) return;
     const appointment = addCurrentAppointmentToBasket();
     if (!appointment) return;
     setClientStep("details");
@@ -2541,6 +2546,7 @@ function ClientBookingInterface({
     resetClientConfirmGuard();
 
     try {
+      if (!isMobilePreviewFrame && !await bookingAccess.refresh()) return;
       if (activeBookingHold) {
         await releaseBookingHoldInSupabase(activeBookingHold);
       }
@@ -2896,6 +2902,7 @@ function ClientBookingInterface({
   }
 
   async function confirmPayment(selectedPaymentMethod = paymentMethod) {
+    if (!isMobilePreviewFrame && !await bookingAccess.refresh()) return;
     setCheckoutError("");
     let appointmentsForConfirmation = checkoutAppointments;
     if (appointmentsForConfirmation.length === 0) {
@@ -3106,6 +3113,24 @@ function ClientBookingInterface({
     if (status === "cash" || status === "cash_on_arrival" || appointment.paymentMethod === "cash") return "I've received your cash payment request";
     if (status === "awaiting_verification" || status === "bank_transfer" || appointment.paymentMethod === "bank_transfer") return "I've received your booking";
     return "Your appointment is confirmed";
+  }
+
+  if (!isMobilePreviewFrame && clientStep !== "my-bookings" && confirmedAppointments.length === 0 && !bookingAccess.allowed) {
+    return <ClientOnboarding
+      loading={bookingAccess.loading}
+      message={bookingAccess.error}
+      onRetry={bookingAccess.refresh}
+      onSwitchAdmin={onSwitchAdmin}
+      onEmailLogin={onEmailLogin}
+      onGoogleLogin={onGoogleLogin}
+      onMyBookings={openMyBookings}
+      onSignOut={onClientSignOut}
+      signingIn={clientAuthActionLoading}
+      error={clientAuthError}
+      notice={clientAuthNotice}
+      profile={clientProfile}
+      session={clientSession}
+    />;
   }
 
   const premiumBookingDetailsPanel = bookingDetailsOpen ? (
@@ -5244,30 +5269,10 @@ function App() {
       if (!cancelled) setClientBookingContextLoading(true);
       try {
         const existingProfile = await getCurrentClientProfile().catch(() => null);
-        const profileInput = profileInputFromAuthUser(session.user, existingProfile);
-        let profile = await upsertCurrentClientProfile(profileInput);
-        const recentGuestBookingContext = readRecentGuestBookingContext();
-        let accountSaveMessage = "";
-        if (recentGuestBookingContext) {
-          try {
-            const linkResult = await linkRecentGuestBookingToCurrentClient(recentGuestBookingContext);
-            if (linkResult.linkedBookingIds.length > 0) {
-              if (linkResult.profile) profile = linkResult.profile;
-              clearRecentGuestBookingContext();
-              accountSaveMessage = linkResult.emailMismatch
-                ? "Your details are saved for next time. I kept the original booking email on this booking."
-                : "Your details are saved for next time.";
-            }
-          } catch (linkError) {
-            console.warn("Recent guest booking link failed.", linkError);
-            accountSaveMessage = "You are signed in, but this booking could not be saved to your account yet.";
-          }
-        }
         const bookingContext = await loadCurrentClientBookingContext();
         if (!cancelled) {
-          setClientProfile(profile);
+          setClientProfile(existingProfile);
           setClientBookingContext(bookingContext);
-          if (accountSaveMessage) setClientBookingMessage(accountSaveMessage);
         }
       } catch (error) {
         if (!cancelled) {
@@ -5839,7 +5844,7 @@ function App() {
       const redirectTo = buildClientAuthRedirectUrl();
       await signInClientWithGoogle(redirectTo);
     } catch (error) {
-      const message = friendlyClientAuthError(error, "Google sign-in is not enabled yet. Please use email sign-in or continue as a guest.");
+      const message = friendlyClientAuthError(error, "Google sign-in is not enabled yet. Please use email sign-in.");
       setClientAuthError(message);
     } finally {
       setClientAuthActionLoading(false);
@@ -5862,7 +5867,7 @@ function App() {
       await signInClientWithEmail(normalizedEmail, redirectTo);
       setClientAuthNotice("Check your email for a secure sign-in link.");
     } catch (error) {
-      const message = friendlyClientAuthError(error, "I couldn't send the sign-in email just now. Please continue as a guest or try again.");
+      const message = friendlyClientAuthError(error, "I couldn't send the sign-in email just now. Please try again.");
       setClientAuthError(message);
     } finally {
       setClientAuthActionLoading(false);
@@ -6364,6 +6369,7 @@ function App() {
     logBookingConfirmation("confirm started");
 
     try {
+      if (!isMobilePreviewFrame) await requireClientBookingAccess(await getSupabaseClient());
       // Always create an order for client-originated bookings so payment metadata is tracked.
       const orderId = crypto.randomUUID ? crypto.randomUUID() : `order-${Date.now()}`;
       const paymentId = `pay_${orderId}`;
@@ -6846,18 +6852,30 @@ function App() {
       return;
     }
 
+    let offerHold = null;
     try {
-      await addBookingToDay(entry.offeredDayIndex, {
-        clientName: entry.clientName,
+      await requireClientBookingAccess(await getSupabaseClient());
+      offerHold = await createBookingHoldInSupabase({ dateValue: offeredDay.dateValue,
+        slot: { ...entry.offeredSlot, duration: entry.duration, travelBuffer: DEFAULT_TRAVEL_BUFFER } });
+      const saved = await addBookingToDay(entry.offeredDayIndex, {
+        clientName: clientProfile?.fullName || entry.clientName,
+        customerEmail: authSession?.user?.email || "",
+        customerPhone: clientProfile?.phone || "",
+        hold: offerHold,
         serviceId: entry.offeredServiceId,
         start: entry.offeredSlot.start,
         duration: entry.duration,
         travelBuffer: DEFAULT_TRAVEL_BUFFER,
         userId: authSession?.user?.id || "",
       });
+      if (!saved) {
+        await releaseBookingHoldInSupabase(offerHold);
+        return;
+      }
     } catch (error) {
+      if (offerHold) await releaseBookingHoldInSupabase(offerHold).catch(() => {});
       console.error(error);
-      setClientBookingMessage(error.message);
+      setClientBookingMessage(clientAccessErrorMessage(error) || "I couldn't accept this offer. Please try again.");
       return;
     }
 
@@ -7734,6 +7752,7 @@ function App() {
         </>
       )}
     </main>
+    <footer className="privacy-footer"><a href="/privacy">Privacy Notice</a><span aria-hidden="true"> · </span><a href="/terms">Terms of Service</a></footer>
     {showLocalPreviewControls && !isMobilePreviewFrame && (
       <>
         <button type="button" className="mobile-preview-trigger square-green-action" onClick={() => setMobilePreviewOpen(true)}>

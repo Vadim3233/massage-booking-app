@@ -192,8 +192,7 @@ export async function saveBookingToSupabase(booking, status = null) {
     throw new Error(BOOKING_SYSTEM_UPDATE_REQUIRED_MESSAGE);
   }
 
-  const usesPrivateClientRecord = Boolean(booking?.userId || booking?.savedAddressId);
-  const supabase = usesPrivateClientRecord ? await getSupabaseClient() : await getPublicSupabaseClient();
+  const supabase = await getSupabaseClient();
   const bookingId = ensureSupabaseBookingId(booking);
   const bookingWithId = { ...booking, id: bookingId };
 

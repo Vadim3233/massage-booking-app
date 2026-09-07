@@ -558,6 +558,7 @@ export function ClientDetailsStep({
             <span>
               <strong>Additional Notes (Optional)</strong>
               <input type="text" placeholder="Any additional notes for your therapist" value={contact.additionalNotes} onChange={(event) => onChangeAddress("additionalNotes", event.target.value)} />
+              <small>Please do not include medical or health information here. Contact Vad if there is something he needs to know before your appointment.</small>
             </span>
           </label>
         </div>

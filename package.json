@@ -8,13 +8,19 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/schedulingEngine.test.js && node src/lib/enhancementSettings.test.js && node src/lib/enhancementSupabase.test.js && node src/lib/weeklyWorkingSchedule.test.js && node src/lib/workingHoursState.test.js && node src/lib/workingHoursSupabase.test.js && node src/lib/bookingBasket.test.js && node src/lib/sessionPreferences.test.js && node src/lib/clientData.test.js && node src/lib/bankTransferDetails.test.js && node src/lib/bookingSupabase.test.js && node src/lib/bookingHoldErrors.test.js && node src/lib/bookingHoldRpcs.test.js && node src/lib/clientBookingLimitsMigration.test.js && node src/lib/secureBookingUpdateMigration.test.js && node src/lib/productionSafetyRepairMigration.test.js && node src/lib/unpaidReservationAutomation.test.js && node src/lib/apiSecretProtection.test.js && node src/lib/telegramWebhook.test.js && node src/lib/securitySchema.test.js && node src/lib/adminWorkspace.test.js && node src/lib/financialAnalytics.test.js && node src/lib/clientReservationInactivity.test.js && node src/dev/fakeClients.test.js && node src/reservationFlow.test.js",
+    "test": "node src/schedulingEngine.test.js && node src/lib/enhancementSettings.test.js && node src/lib/enhancementSupabase.test.js && node src/lib/weeklyWorkingSchedule.test.js && node src/lib/workingHoursState.test.js && node src/lib/workingHoursSupabase.test.js && node src/lib/bookingBasket.test.js && node src/lib/sessionPreferences.test.js && node src/lib/clientData.test.js && node src/lib/bankTransferDetails.test.js && node src/lib/bookingSupabase.test.js && node src/lib/bookingHoldErrors.test.js && node src/lib/bookingHoldRpcs.test.js && node src/lib/clientBookingLimitsMigration.test.js && node src/lib/secureBookingUpdateMigration.test.js && node src/lib/productionSafetyRepairMigration.test.js && node src/lib/unpaidReservationAutomation.test.js && node src/lib/apiSecretProtection.test.js && node src/lib/telegramWebhook.test.js && node src/lib/securitySchema.test.js && node src/lib/adminWorkspace.test.js && node src/lib/financialAnalytics.test.js && node src/lib/clientReservationInactivity.test.js && node src/dev/fakeClients.test.js && node src/reservationFlow.test.js && node src/lib/clientAccessFoundation.test.js && node src/lib/clientBookingAccess.test.js && node src/lib/clientAccess.test.js && node src/lib/clientAccessStage3.test.js && node src/lib/clientAccessStage3Ui.test.js",
     "test:engine": "node src/schedulingEngine.test.js",
     "test:basket": "node src/lib/bookingBasket.test.js",
     "test:client-data": "node src/lib/clientData.test.js",
+    "test:client-access": "node src/lib/clientAccessFoundation.test.js",
+    "test:client-access:concurrency": "node scripts/test-client-access-concurrency.mjs",
     "test:security-schema": "node src/lib/securitySchema.test.js",
     "test:migration": "node scripts/validate-security-migration.mjs",
-    "test:migration:rebuild": "node scripts/validate-rebuild-client-security.mjs"
+    "test:migration:rebuild": "node scripts/validate-rebuild-client-security.mjs",
+    "test:booking-access": "node src/lib/clientBookingAccess.test.js && node src/lib/clientAccess.test.js",
+    "test:booking-access:concurrency": "node scripts/test-client-access-concurrency.mjs --booking-access",
+    "test:client-access:stage3": "node src/lib/clientAccessStage3.test.js && node src/lib/clientAccessStage3Ui.test.js",
+    "dev:client-access-fixture": "node scripts/serve-stage3-fixture.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

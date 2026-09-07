@@ -34,10 +34,10 @@ export async function signInClientWithGoogle(redirectTo) {
   return data;
 }
 
-export async function signInClientWithEmail(email, redirectTo) {
+export async function signInClientWithEmail(email, redirectTo, { shouldCreateUser = false } = {}) {
   const { data, error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: redirectTo },
+    options: { emailRedirectTo: redirectTo, shouldCreateUser },
   });
   if (error) throw error;
   return data;

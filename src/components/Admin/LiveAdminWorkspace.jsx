@@ -168,6 +168,7 @@ import { AdminAppointmentWizard } from "./AdminAppointmentWizard.jsx";
 import { AdminAppointmentOverviewModal } from "./AdminAppointmentOverviewModal.jsx";
 import { AdminPendingVerificationPanel } from "./AdminPendingVerificationPanel.jsx";
 import { AdminClientDirectoryPanel } from "./AdminClientDirectoryPanel.jsx";
+import { AdminClientAccessPanel } from "./AdminClientAccessPanel.jsx";
 import { AdminClientProfilePanel } from "./AdminClientProfilePanel.jsx";
 import { AdminServiceEditorPanel } from "./AdminServiceEditorPanel.jsx";
 import { AdminServicesPanel } from "./AdminServicesPanel.jsx";
@@ -792,7 +793,7 @@ async function loadPublicAvailabilityFromSupabase(days) {
 }
 
 async function createBookingHoldInSupabase({ dateValue, slot }) {
-  const supabase = await getPublicSupabaseClient();
+  const supabase = await getSupabaseClient();
   const clientKey = getBookingHoldClientKey();
   const holdDateValue = normalizePlainDateValue(dateValue);
   if (!holdDateValue) {
@@ -834,7 +835,7 @@ async function releaseBookingHoldInSupabase(hold) {
   if (hold?.previewOnly) return;
   if (!hold?.id || !hold?.token) return;
 
-  const supabase = await getPublicSupabaseClient();
+  const supabase = await getSupabaseClient();
   const { error } = await supabase.rpc("release_booking_hold", {
     release_client_key: getBookingHoldClientKey(),
     release_hold_id: hold.id,
@@ -5056,6 +5057,7 @@ export function LiveAdminWorkspace({
   weeklyWorkingSchedule,
 }) {
   const [activeTab, setActiveTab] = useState("calendar");
+  const [clientDirectoryView, setClientDirectoryView] = useState('history');
   const [calendarMode, setCalendarMode] = useState("agenda");
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
   const [selectedSettingsCategory, setSelectedSettingsCategory] = useState(null);
@@ -8195,7 +8197,13 @@ export function LiveAdminWorkspace({
 
         {activeTab === "customers" && (
           <section className={`admin-screen clients-screen ${clientProfileOpen ? "clients-profile-mode" : "clients-list-mode"}`}>
-            {!clientProfileOpen && (
+            <nav className="client-access-tabs" aria-label="Client management">
+              {[['history', 'Booking history'], ['invitations', 'Invitations'], ['access', 'Client Access']].map(([id, label]) => (
+                <button type="button" aria-current={clientDirectoryView === id ? 'page' : undefined} key={id} onClick={() => setClientDirectoryView(id)}>{label}</button>
+              ))}
+            </nav>
+            {clientDirectoryView !== 'history' && <AdminClientAccessPanel key={clientDirectoryView} mode={clientDirectoryView} />}
+            {clientDirectoryView === 'history' && !clientProfileOpen && (
               <AdminClientDirectoryPanel
                 customerFilter={customerFilter}
                 customerSearch={customerSearch}
@@ -8207,7 +8215,7 @@ export function LiveAdminWorkspace({
               />
             )}
 
-            {clientProfileOpen && profileCustomer && (
+            {clientDirectoryView === 'history' && clientProfileOpen && profileCustomer && (
               <AdminClientProfilePanel
                 activeSection={activeClientProfileTab}
                 customer={profileCustomer}

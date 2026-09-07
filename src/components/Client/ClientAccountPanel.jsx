@@ -79,7 +79,7 @@ export function ClientAccountPanel({
       <button type="button" className="secondary-button client-my-bookings-entry" onClick={onMyBookings}>
         My Bookings
       </button>
-      <p>You can also continue as a guest. Sign-in is optional.</p>
+      <p>Please sign in to manage your appointments. New bookings require approved client access.</p>
       {notice && <p className="client-account-notice" role="status">{notice}</p>}
       {error && <p className="client-account-error" role="alert">{error}</p>}
     </section>
