@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createAdminNavigationHistory } from "../../lib/adminNavigationHistory.js";
 import {
   Activity,
   CalendarDays,
@@ -5151,6 +5152,52 @@ export function LiveAdminWorkspace({
   const initialCalendarTodayAnchorRef = useRef(false);
   const threeDayGridRef = useRef(null);
   const [pendingAgendaScrollDate, setPendingAgendaScrollDate] = useState(null);
+  const adminNavigationHistoryRef = useRef(null);
+  if (typeof window !== "undefined" && !adminNavigationHistoryRef.current) {
+    adminNavigationHistoryRef.current = createAdminNavigationHistory({
+      history: window.history,
+      onNavigate: (snapshot) => {
+        setActiveTab(snapshot.tab);
+        setCalendarMode(snapshot.calendarMode);
+        setSelectedSettingsCategory(snapshot.settingsCategory);
+        setSelectedSettingsSubsection(snapshot.settingsSubsection);
+        setSettingsReturnCategory(snapshot.settingsReturnCategory);
+        setClientDirectoryView(snapshot.clientDirectoryView);
+        setClientProfileOpen(snapshot.clientProfileOpen);
+        setSelectedCustomerId(snapshot.selectedCustomerId);
+      },
+    });
+  }
+  const adminNavigationSnapshot = useMemo(() => ({
+    tab: activeTab,
+    calendarMode,
+    settingsCategory: selectedSettingsCategory,
+    settingsSubsection: selectedSettingsSubsection,
+    settingsReturnCategory,
+    clientDirectoryView,
+    clientProfileOpen,
+    selectedCustomerId: clientProfileOpen ? selectedCustomerId : null,
+  }), [
+    activeTab,
+    calendarMode,
+    selectedSettingsCategory,
+    selectedSettingsSubsection,
+    settingsReturnCategory,
+    clientDirectoryView,
+    clientProfileOpen,
+    selectedCustomerId,
+  ]);
+  useEffect(() => {
+    const controller = adminNavigationHistoryRef.current;
+    if (!controller) return undefined;
+    controller.initialize(adminNavigationSnapshot);
+    const handlePopState = (event) => controller.handlePopState(event);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+  useEffect(() => {
+    adminNavigationHistoryRef.current?.sync(adminNavigationSnapshot);
+  }, [adminNavigationSnapshot]);
 
   const selectedDayBookings = getActiveBookingBlocks(bookings);
   const baseCustomers = buildAdminCustomers(days, waitlistEntries, getEffectiveWaitlistStatus);

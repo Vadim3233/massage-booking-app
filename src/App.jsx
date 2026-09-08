@@ -154,6 +154,7 @@ import {
   weeklySettingsForDateValue,
 } from "./lib/weeklyWorkingSchedule.js";
 import { buildTelegramStartUrl, normalizeTelegramBotUrl } from "./lib/telegramLinks.js";
+import { createBookingStepHistory } from "./lib/bookingStepHistory.js";
 import { ClientEmailSignInForm } from "./components/Client/ClientAccountPanel.jsx";
 import { ClientOnboarding } from "./components/Client/ClientOnboarding.jsx";
 import { useServiceAreaSettings } from "./hooks/useServiceAreaSettings.js";
@@ -1382,9 +1383,41 @@ function ClientBookingInterface({
     if (typeof window === "undefined") return "location";
     const requestedStep = new URLSearchParams(window.location.search).get("clientStep");
     const allowedSteps = new Set(["location", "treatment", "duration", "time", "review", "details", "payment", "my-bookings"]);
-    return allowedSteps.has(requestedStep) ? requestedStep : "location";
+    if (!allowedSteps.has(requestedStep)) return "location";
+    return requestedStep === "location" || requestedStep === "my-bookings" || isMobilePreviewFrame
+      ? requestedStep
+      : "location";
   })();
-  const [clientStep, setClientStep] = useState(initialClientStep);
+  const [clientStep, setClientStepState] = useState(initialClientStep);
+  const clientStepRef = useRef(initialClientStep);
+  const clientStepHistoryRef = useRef(null);
+  if (typeof window !== "undefined" && !clientStepHistoryRef.current) {
+    clientStepHistoryRef.current = createBookingStepHistory({
+      history: window.history,
+      location: window.location,
+      onStep: (step) => {
+        clientStepRef.current = step;
+        setClientStepState(step);
+      },
+    });
+  }
+  const setClientStep = useCallback((nextStep, options) => {
+    const step = typeof nextStep === "function" ? nextStep(clientStepRef.current) : nextStep;
+    if (clientStepHistoryRef.current) {
+      clientStepHistoryRef.current.navigate(step, options);
+      return;
+    }
+    clientStepRef.current = step;
+    setClientStepState(step);
+  }, []);
+  useEffect(() => {
+    const controller = clientStepHistoryRef.current;
+    if (!controller) return undefined;
+    controller.initialize(clientStepRef.current);
+    const handlePopState = (event) => controller.handlePopState(event);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   const [mobileProgressOpen, setMobileProgressOpen] = useState(false);
   const [selectedAreaId, setSelectedAreaId] = useState("");
   const [showMoreAreas, setShowMoreAreas] = useState(false);
@@ -2048,7 +2081,6 @@ function ClientBookingInterface({
   }
 
   useEffect(() => {
-    if (!isMobilePreviewFrame) return;
     if (!bookingSteps.some(([id]) => id === clientStep)) return;
 
     const fallbackStep = firstClientStepForMissingPrerequisite(clientStep);
@@ -2059,7 +2091,7 @@ function ClientBookingInterface({
       setClientBookingMessage(reason);
       setCheckoutError(reason);
     }
-    setClientStep(fallbackStep);
+    setClientStep(fallbackStep, { replace: true });
   }, [
     basketItems.length,
     clientSelectedSlot,
