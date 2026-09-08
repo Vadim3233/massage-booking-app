@@ -147,10 +147,13 @@ export function normalizeStoredBooking(booking) {
 
   if (!isFiniteNumber(startMinutes) || !isFiniteNumber(booking.duration) || !isFiniteNumber(booking.travelBuffer)) return null;
   const paymentMetadata = normalizePaymentMetadata(booking);
+  const price = isFiniteNumber(booking.price) ? Number(booking.price) : 0;
+  const congestionFee = isFiniteNumber(booking.congestionFee) ? Number(booking.congestionFee) : 0;
+  const travelFee = isFiniteNumber(booking.travelFee) ? Number(booking.travelFee) : 0;
 
   return {
     address: typeof booking.address === "string" ? booking.address : "",
-    congestionFee: isFiniteNumber(booking.congestionFee) ? Number(booking.congestionFee) : 0,
+    congestionFee,
     clientName: typeof booking.clientName === "string" ? booking.clientName : "",
     customerEmail: typeof booking.customerEmail === "string" ? booking.customerEmail : "",
     customerPhone: typeof booking.customerPhone === "string" ? booking.customerPhone : "",
@@ -182,7 +185,7 @@ export function normalizeStoredBooking(booking) {
     cancelledBy: cleanOptionalString(booking.cancelledBy),
     cancellationWindow: cleanOptionalString(booking.cancellationWindow),
     cashOnArrivalRequest: paymentMetadata.cashOnArrivalRequest,
-    price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
+    price,
     serviceId: String(booking.serviceId),
     serviceName: String(booking.serviceName),
     sessionNotes: cleanOptionalString(booking.sessionNotes || booking.notes),
@@ -192,7 +195,8 @@ export function normalizeStoredBooking(booking) {
     startMinutes,
     telegramUpdates: Boolean(booking.telegramUpdates),
     duration: Number(booking.duration),
-    travelFee: isFiniteNumber(booking.travelFee) ? Number(booking.travelFee) : 0,
+    total: isFiniteNumber(booking.total) ? Number(booking.total) : price + congestionFee + travelFee,
+    travelFee,
     travelBuffer: Math.max(0, Number(booking.travelBuffer)),
   };
 }
@@ -309,10 +313,13 @@ export function engineBookingToStorageBooking(booking) {
 
   if (!isFiniteNumber(startMinutes) || !isFiniteNumber(booking.duration) || !isFiniteNumber(booking.travelBuffer)) return null;
   const paymentMetadata = normalizePaymentMetadata(booking);
+  const price = isFiniteNumber(booking.price) ? Number(booking.price) : 0;
+  const congestionFee = isFiniteNumber(booking.congestionFee) ? Number(booking.congestionFee) : 0;
+  const travelFee = isFiniteNumber(booking.travelFee) ? Number(booking.travelFee) : 0;
 
   return {
     address: typeof booking.address === "string" ? booking.address : "",
-    congestionFee: isFiniteNumber(booking.congestionFee) ? Number(booking.congestionFee) : 0,
+    congestionFee,
     clientName: typeof booking.clientName === "string" ? booking.clientName : "",
     customerEmail: typeof booking.customerEmail === "string" ? booking.customerEmail : "",
     customerPhone: typeof booking.customerPhone === "string" ? booking.customerPhone : "",
@@ -344,7 +351,7 @@ export function engineBookingToStorageBooking(booking) {
     cancelledBy: cleanOptionalString(booking.cancelledBy),
     cancellationWindow: cleanOptionalString(booking.cancellationWindow),
     cashOnArrivalRequest: paymentMetadata.cashOnArrivalRequest,
-    price: isFiniteNumber(booking.price) ? Number(booking.price) : 0,
+    price,
     serviceId: String(booking.serviceId),
     serviceName: String(booking.serviceName),
     sessionNotes: cleanOptionalString(booking.sessionNotes || booking.notes),
@@ -354,7 +361,8 @@ export function engineBookingToStorageBooking(booking) {
     startMinutes,
     telegramUpdates: Boolean(booking.telegramUpdates),
     duration: Number(booking.duration),
-    travelFee: isFiniteNumber(booking.travelFee) ? Number(booking.travelFee) : 0,
+    total: isFiniteNumber(booking.total) ? Number(booking.total) : price + congestionFee + travelFee,
+    travelFee,
     travelBuffer: Math.max(0, Number(booking.travelBuffer)),
   };
 }
@@ -456,6 +464,12 @@ export function supabaseRowToStorageBooking(row) {
       cancelledAt: cleanOptionalString(row.cancelled_at) || savedBooking.cancelledAt || null,
       cancelledBy: cleanOptionalString(row.cancelled_by) || savedBooking.cancelledBy || "",
       cancellationWindow: cleanOptionalString(row.cancellation_window) || savedBooking.cancellationWindow || "",
+      congestionFee: isFiniteNumber(row.congestion_fee) ? Number(row.congestion_fee) : savedBooking.congestionFee,
+      price: isFiniteNumber(row.price) ? Number(row.price) : savedBooking.price,
+      total: (isFiniteNumber(row.price) ? Number(row.price) : savedBooking.price)
+        + (isFiniteNumber(row.congestion_fee) ? Number(row.congestion_fee) : savedBooking.congestionFee)
+        + (isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : savedBooking.travelFee),
+      travelFee: isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : savedBooking.travelFee,
     };
   }
 
@@ -500,6 +514,9 @@ export function supabaseRowToStorageBooking(row) {
     status: typeof row.status === "string" ? row.status : "confirmed",
     telegramUpdates: false,
     duration,
+    total: (isFiniteNumber(row.price) ? Number(row.price) : 0)
+      + (isFiniteNumber(row.congestion_fee) ? Number(row.congestion_fee) : 0)
+      + (isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : 0),
     travelFee: isFiniteNumber(row.travel_fee) ? Number(row.travel_fee) : 0,
     travelBuffer: DEFAULT_TRAVEL_BUFFER,
   };

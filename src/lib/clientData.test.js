@@ -535,6 +535,45 @@ assert.equal(normalizeClientPortalBooking(cancelledBookingRow).cancelledBy, "cli
 assert.equal(normalizeClientPortalBooking(cancelledBookingRow).cancellationWindow, "late");
 
 {
+  const feeBookingRow = {
+    ...futureBookingRow,
+    price: 90,
+    congestion_fee: 18,
+    travel_fee: 0,
+  };
+  const portalBooking = normalizeClientPortalBooking(feeBookingRow);
+  const details = buildClientBookingDetailsViewModel(portalBooking, { userId });
+
+  assert.equal(portalBooking.price, 90);
+  assert.equal(portalBooking.congestionFee, 18);
+  assert.equal(portalBooking.travelFee, 0);
+  assert.equal(portalBooking.total, 108);
+  assert.equal(details.serviceAmountLabel, "£90.00");
+  assert.equal(details.congestionFeeLabel, "£18.00");
+  assert.equal(details.travelFeeLabel, "");
+  assert.equal(details.amountLabel, "£108.00");
+
+  const noFeeDetails = buildClientBookingDetailsViewModel(
+    normalizeClientPortalBooking({ ...feeBookingRow, congestion_fee: 0 }),
+    { userId }
+  );
+  assert.equal(noFeeDetails.amountLabel, "£90.00");
+  assert.equal(noFeeDetails.congestionFeeLabel, "");
+
+  const bothFeeDetails = buildClientBookingDetailsViewModel(
+    normalizeClientPortalBooking({ ...feeBookingRow, congestion_fee: 18, travel_fee: 12 }),
+    { userId }
+  );
+  assert.equal(bothFeeDetails.amountLabel, "£120.00");
+  assert.equal(bothFeeDetails.travelFeeLabel, "£12.00");
+
+  const originalTotal = details.amountLabel;
+  const laterAreaSettings = { congestionFee: 99, travelFee: 25 };
+  assert.equal(laterAreaSettings.congestionFee + laterAreaSettings.travelFee, 124);
+  assert.equal(buildClientBookingDetailsViewModel(portalBooking, { userId }).amountLabel, originalTotal);
+}
+
+{
   const privateNoteRow = {
     ...futureBookingRow,
     payment_method: "bank_transfer",

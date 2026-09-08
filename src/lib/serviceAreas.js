@@ -31,8 +31,8 @@ export function sanitizeServiceAreas(value) {
       ...area,
       name: typeof stored?.name === "string" && stored.name.trim() ? stored.name.trim() : area.name,
       active: typeof stored?.active === "boolean" ? stored.active : area.active,
-      congestionFee: sanitizeFee(stored?.congestionFee),
-      travelSurcharge: sanitizeFee(stored?.travelSurcharge),
+      congestionFee: sanitizeFee(stored?.congestionFee ?? area.congestionFee),
+      travelSurcharge: sanitizeFee(stored?.travelSurcharge ?? area.travelSurcharge),
     };
   });
 

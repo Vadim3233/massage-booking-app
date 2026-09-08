@@ -213,3 +213,19 @@ assert.match(html, /Add a phone number/);
 assert.match(html, /Review your appointment before checkout\./);
 
 console.log("Client booking flow screen characterization tests passed.");
+
+// Saved area components are visible individually; zero fees produce no badge.
+const appPricingSource = readFileSync(new URL("../../App.jsx", import.meta.url), "utf8");
+const mappingStart = appPricingSource.indexOf("  const clientLocationAreas =");
+const mapping = appPricingSource.slice(mappingStart, appPricingSource.indexOf("  const clientTreatmentCards", mappingStart));
+const mapAreas = new Function("visibleServiceAreas", "selectedAreaId", "formatMoney", `${mapping}; return clientLocationAreas;`);
+for (const [congestionFee, travelSurcharge, badges] of [[20,15,2],[0,7,1],[9,0,1],[0,0,0]]) {
+  const area = { id: "mayfair", name: "Mayfair", active: true, congestionFee, travelSurcharge };
+  const markup = renderToStaticMarkup(h(ClientLocationStep, {
+    account: {}, bookAgain: { show: false },
+    serviceAreas: mapAreas([area], "mayfair", (amount) => `£${amount}`),
+  }));
+  assert.equal((markup.match(/class="client-area-fee-badge"/g) || []).length, badges);
+  if (congestionFee) assert.ok(markup.includes(`Congestion charge £${congestionFee}`));
+  if (travelSurcharge) assert.ok(markup.includes(`Travel surcharge £${travelSurcharge}`));
+}

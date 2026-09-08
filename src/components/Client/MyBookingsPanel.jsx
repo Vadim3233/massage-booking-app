@@ -184,6 +184,10 @@ function friendlyCancellationError(error) {
 }
 
 function BookingCard({ actionLabel = "", booking, compact = false, onBookAgain, onViewDetails }) {
+  const total = Math.max(0, Number(booking.price) || 0)
+    + Math.max(0, Number(booking.congestionFee) || 0)
+    + Math.max(0, Number(booking.travelFee) || 0);
+
   return (
     <article className="my-booking-card">
       <div className="my-booking-card-main">
@@ -193,6 +197,7 @@ function BookingCard({ actionLabel = "", booking, compact = false, onBookAgain, 
         </div>
         <h3>{booking.serviceName || "Massage appointment"}</h3>
         <p>{booking.duration ? `${booking.duration} minutes` : "Duration pending"}</p>
+        <p className="my-booking-card-amount">£{total.toFixed(2)}</p>
         {!compact && booking.address && (
           <p><MapPin aria-hidden="true" size={16} />{booking.address}</p>
         )}
@@ -518,7 +523,10 @@ function BookingDetailsView({
           <DetailLine label="Client note" value={details.sessionNotes} />
         )}
         <DetailLine label="Payment method" value={details.paymentMethodLabel} />
-        <DetailLine label="Amount" value={details.amountLabel} />
+        <DetailLine label="Service / booking" value={details.serviceAmountLabel} />
+        <DetailLine label="Travel surcharge" value={details.travelFeeLabel} />
+        <DetailLine label="Congestion charge" value={details.congestionFeeLabel} />
+        <DetailLine label="Total" value={details.amountLabel} />
         <DetailLine label="Confirmation email" value={details.confirmationEmail} />
         <DetailLine label="Cancelled at" value={details.cancelledAtLabel} />
         <DetailLine label="Cancelled by" value={details.cancelledByLabel} />

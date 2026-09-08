@@ -5048,6 +5048,7 @@ export function LiveAdminWorkspace({
   selectedDay,
   selectedDayIndex,
   serviceAreas,
+  areaSettings,
   services,
   serviceDetails,
   enhancements,
@@ -8522,7 +8523,10 @@ export function LiveAdminWorkspace({
               onUpdateEnhancement={onUpdateEnhancement}
             />
             <ServiceAreasSettingsPanel
-              serviceAreas={serviceAreas}
+              serviceAreas={areaSettings.draft}
+              saveStatus={areaSettings}
+              onSave={areaSettings.save}
+              onRetry={areaSettings.retry}
               onAddServiceArea={onAddServiceArea}
               onDeleteServiceArea={onDeleteServiceArea}
               onUpdateServiceArea={onUpdateServiceArea}

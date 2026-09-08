@@ -110,4 +110,40 @@ const pendingHtml = renderToStaticMarkup(
 assert.match(pendingHtml, /Pending Payment Verification/);
 assert.match(pendingHtml, /Awaiting Verification/);
 
+const feeBookingHtml = renderToStaticMarkup(
+  React.createElement(BookingCard, {
+    booking: {
+      congestionFee: 18,
+      dateValue: "2026-09-05",
+      duration: 60,
+      id: "fee-booking",
+      price: 90,
+      serviceName: "Massage",
+      travelFee: 0,
+    },
+    onViewDetails: () => {},
+  })
+);
+assert.match(feeBookingHtml, /class="my-booking-card-amount">£108\.00/);
+
+const bothFeeBookingHtml = renderToStaticMarkup(
+  React.createElement(BookingCard, {
+    booking: {
+      congestionFee: 18,
+      dateValue: "2026-09-05",
+      duration: 60,
+      id: "both-fees",
+      price: 90,
+      serviceName: "Massage",
+      travelFee: 12,
+    },
+    onViewDetails: () => {},
+  })
+);
+assert.match(bothFeeBookingHtml, /class="my-booking-card-amount">£120\.00/);
+assert.match(source, /DetailLine label="Service \/ booking" value=\{details\.serviceAmountLabel\}/);
+assert.match(source, /DetailLine label="Congestion charge" value=\{details\.congestionFeeLabel\}/);
+assert.match(source, /DetailLine label="Travel surcharge" value=\{details\.travelFeeLabel\}/);
+assert.match(source, /DetailLine label="Total" value=\{details\.amountLabel\}/);
+
 console.log("My bookings panel status badge tests passed.");

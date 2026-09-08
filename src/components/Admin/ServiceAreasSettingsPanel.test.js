@@ -129,6 +129,9 @@ function defaultAreas() {
 function defaultProps(overrides = {}) {
   return {
     serviceAreas: defaultAreas(),
+    saveStatus: { ready: true, dirty: false },
+    onSave: () => {},
+    onRetry: () => {},
     onAddServiceArea: () => {},
     onDeleteServiceArea: () => {},
     onUpdateServiceArea: () => {},
@@ -145,11 +148,11 @@ function panelElement(ServiceAreasSettingsPanel, overrides = {}) {
 }
 
 function articles(element) {
-  return React.Children.toArray(element.props.children[2].props.children);
+  return React.Children.toArray(element.props.children[0].props.children[2].props.children);
 }
 
 function addButton(element) {
-  return element.props.children[0].props.children[1];
+  return element.props.children[0].props.children[0].props.children[1];
 }
 
 function positionLabel(article) {
@@ -176,14 +179,14 @@ function deleteButton(article) {
 const { ServiceAreasSettingsPanel, hasComponent, source } = await loadServiceAreasSettingsPanel();
 
 if (hasComponent) {
-  assert.match(source, /export function ServiceAreasSettingsPanel\(\{\s*serviceAreas,\s*onAddServiceArea,\s*onDeleteServiceArea,\s*onUpdateServiceArea,\s*\}\)/);
+  assert.match(source, /export function ServiceAreasSettingsPanel\(\{\s*serviceAreas,\s*saveStatus,\s*onSave,\s*onRetry,\s*onAddServiceArea,\s*onDeleteServiceArea,\s*onUpdateServiceArea,\s*\}\)/);
   assert.match(source, /key=\{area\.id\}/);
   assert.doesNotMatch(source, /useState|useEffect|useRef|setTimeout|setInterval|fetch|localStorage|supabase|async/i);
 }
 
 {
   const markup = renderPanel(ServiceAreasSettingsPanel, { serviceAreas: [] });
-  assert.equal(markup, '<div class="admin-settings-section service-area-settings-section" id="admin-service-areas"><div class="admin-screen-heading compact-settings-heading"><div><p>Client booking</p><h2>Service areas</h2></div><button type="button">Add area</button></div><p class="admin-muted-note">Turn areas on or off and set optional manual fees. Active areas appear on the first booking step.</p><div class="admin-service-area-list"></div></div>');
+  assert.equal(markup, '<div class="admin-settings-section service-area-settings-section" id="admin-service-areas"><fieldset style="border:0;margin:0;padding:0;min-width:0"><div class="admin-screen-heading compact-settings-heading"><div><p>Client booking</p><h2>Service areas</h2></div><button type="button">Add area</button></div><p class="admin-muted-note">Turn areas on or off and set optional manual fees. Active areas appear on the first booking step.</p><div class="admin-service-area-list"></div></fieldset><div class="weekly-working-footer"><button type="button" class="admin-primary-action" disabled="">Save area settings</button></div></div>');
 }
 
 {
@@ -246,11 +249,11 @@ if (hasComponent) {
   assert.equal(toggleInput(article).props.checked, true);
   assert.equal(congestionInput.props.type, "number");
   assert.equal(congestionInput.props.min, "0");
-  assert.equal(congestionInput.props.step, "1");
+  assert.equal(congestionInput.props.step, "0.01");
   assert.equal(congestionInput.props.value, 0);
   assert.equal(travelInput.props.type, "number");
   assert.equal(travelInput.props.min, "0");
-  assert.equal(travelInput.props.step, "1");
+  assert.equal(travelInput.props.step, "0.01");
   assert.equal(travelInput.props.value, 0);
 }
 

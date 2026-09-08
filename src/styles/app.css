@@ -8637,6 +8637,11 @@ label {
   padding-top: 4px;
 }
 
+.my-booking-card .my-booking-card-amount {
+  color: var(--ds-text-strong);
+  font-weight: 800;
+}
+
 .day-settings-sheet-actions button {
   min-height: 54px;
   border-radius: 12px;

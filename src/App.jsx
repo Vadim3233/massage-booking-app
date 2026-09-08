@@ -51,7 +51,7 @@ import {
   rangesOverlap,
   timeToMinutes,
 } from "./schedulingEngine.js";
-import { getServiceAreaFees, sanitizeServiceAreas, serviceAreas as DEFAULT_SERVICE_AREAS } from "./lib/serviceAreas.js";
+import { getServiceAreaFees } from "./lib/serviceAreas.js";
 import {
   buildBookingClientLink,
   buildBookAgainPrefill,
@@ -156,6 +156,7 @@ import {
 import { buildTelegramStartUrl, normalizeTelegramBotUrl } from "./lib/telegramLinks.js";
 import { ClientEmailSignInForm } from "./components/Client/ClientAccountPanel.jsx";
 import { ClientOnboarding } from "./components/Client/ClientOnboarding.jsx";
+import { useServiceAreaSettings } from "./hooks/useServiceAreaSettings.js";
 import { useClientBookingAccess } from "./hooks/useClientBookingAccess.js";
 import { clientAccessErrorMessage, requireClientBookingAccess } from "./lib/clientAccess.js";
 import { MyBookingsPanel } from "./components/Client/MyBookingsPanel.jsx";
@@ -189,7 +190,6 @@ import {
   ENHANCEMENTS_STORAGE_KEY,
   EXPENSES_STORAGE_KEY,
   FINANCIAL_SETTINGS_STORAGE_KEY,
-  SERVICE_AREAS_STORAGE_KEY,
   SERVICE_CATALOGUE_MIGRATION_KEY,
   SERVICE_DETAILS_STORAGE_KEY,
   SERVICES_STORAGE_KEY,
@@ -277,6 +277,7 @@ const THREE_DAY_SCROLL_PAST_DAYS = 180;
 const THREE_DAY_SCROLL_FUTURE_DAYS = 365;
 const CURRENT_SERVICE_CATALOGUE_VERSION = "2026-07-new-service-structure";
 const CLIENT_TELEGRAM_BOT_URL = normalizeTelegramBotUrl(import.meta.env.VITE_TELEGRAM_BOT_URL);
+if (!CLIENT_TELEGRAM_BOT_URL) console.warn("Client Telegram updates unavailable: configure VITE_TELEGRAM_BOT_URL with the public bot URL.");
 const DEFAULT_SESSION_PREFERENCE_DRAFT = {
   category: "Focus area",
   conflictIds: [],
@@ -1333,6 +1334,7 @@ function ClientBookingInterface({
   days,
   coverageZones,
   serviceAreas,
+  serviceAreasMessage = "",
   services,
   serviceDetails,
   enhancements,
@@ -1756,6 +1758,15 @@ function ClientBookingInterface({
   const activeServiceAreas = serviceAreas.filter((area) => area.active !== false);
   const selectedArea = activeServiceAreas.find((area) => area.id === selectedAreaId) ?? null;
   const selectedAreaFees = getServiceAreaFees(serviceAreas, selectedAreaId);
+  useEffect(() => {
+    const appointments = checkoutAppointmentsRef.current;
+    if (appointments.some((appointment) => appointment.selectedAreaId !== selectedAreaId
+      || appointment.congestionFee !== selectedAreaFees.congestionFee
+      || appointment.travelFee !== selectedAreaFees.travelSurcharge)) {
+      releaseCheckoutHolds(appointments);
+      setCheckoutAppointments([]);
+    }
+  }, [selectedAreaId, selectedAreaFees.congestionFee, selectedAreaFees.travelSurcharge]);
   const featuredServiceAreas = PRIMARY_CLIENT_AREA_IDS
     .map((areaId) => activeServiceAreas.find((area) => area.id === areaId))
     .filter(Boolean);
@@ -2329,6 +2340,10 @@ function ClientBookingInterface({
   }
 
   function updateSelectedArea(areaId) {
+    if (areaId !== selectedAreaId) {
+      releaseCheckoutHolds();
+      setCheckoutAppointments([]);
+    }
     setSelectedAreaId(areaId);
     setAreaSelectionMessage("");
     setClientBookingMessage("");
@@ -3276,7 +3291,7 @@ function ClientBookingInterface({
             signingIn: clientAuthActionLoading,
           }}
           areaPickerRef={areaPickerRef}
-          areaSelectionMessage={areaSelectionMessage}
+          areaSelectionMessage={areaSelectionMessage || serviceAreasMessage}
           bookAgain={{
             show: Boolean(clientSession?.user),
             clientName: clientProfile?.fullName || "",
@@ -3946,6 +3961,12 @@ function ClientBookingInterface({
                             <p><Clock3 aria-hidden="true" size={21} strokeWidth={1.7} /> {minutesToTime(appointment.start)} - {minutesToTime(appointment.end)} ({appointment.duration} minutes)</p>
                             <p><MapPin aria-hidden="true" size={21} strokeWidth={1.7} /> {appointment.selectedAreaName || appointment.location || "Area confirmed"}</p>
                             <p><ReceiptText aria-hidden="true" size={21} strokeWidth={1.7} /> {appointmentReference}</p>
+                            {Number(appointment.congestionFee) > 0 && (
+                              <p>Congestion Fee: {formatMoney(appointment.congestionFee)}</p>
+                            )}
+                            {Number(appointment.travelFee) > 0 && (
+                              <p>Travel Fee: {formatMoney(appointment.travelFee)}</p>
+                            )}
                             {(confirmationPreferenceLabels.length > 0 || confirmationSessionNotes) && (
                               <div className="confirmation-session-preferences">
                                 {confirmationPreferenceLabels.length > 0 && (
@@ -3992,18 +4013,18 @@ function ClientBookingInterface({
                   <div>
                     <h2>Telegram updates</h2>
                     <p>Email remains the main place for your confirmation and reminder.</p>
-                    <p>
+                    {confirmationTelegramUrl && <p>
                       For Telegram updates,{" "}
                       <strong className="confirmation-telegram-start">open the chat bot and press Start</strong>.
                       {" "}Your booking reference is included so I can connect your request.
-                    </p>
+                    </p>}
                     {confirmationTelegramUrl ? (
                       <a className="confirmation-telegram-action" href={confirmationTelegramUrl} target="_blank" rel="noreferrer">
-                        Open Telegram chat bot
+                        Open Telegram bot
                         <ChevronRight aria-hidden="true" size={22} strokeWidth={1.8} />
                       </a>
                     ) : (
-                      <p className="confirmation-telegram-note">If you prefer Telegram, contact me directly and I will send you the bot link.</p>
+                      <p className="confirmation-telegram-note">Telegram updates are currently unavailable. Your booking updates will arrive by email.</p>
                     )}
                   </div>
                 </section>
@@ -4244,6 +4265,9 @@ function ClientBookingInterface({
                       <article className="payment-card amount-due-card">
                         <span>Booking Total</span>
                         <strong>{"\u00a3"}{paymentDisplayTotal.toFixed(2)}</strong>
+                        {reviewPriceRows.filter((row) => ["Travel Fee", "Congestion Fee"].includes(row.label)).map((row) => (
+                          <p key={row.label}>{row.label}: {formatMoney(row.value)}</p>
+                        ))}
                       </article>
                     </section>
                     <section className="payment-transfer-layout">
@@ -5035,9 +5059,6 @@ function App() {
   const [coverageZones, setCoverageZones] = useState(() =>
     sanitizeCoverageZones(readStoredJson(COVERAGE_ZONES_STORAGE_KEY, DEFAULT_COVERAGE_ZONES))
   );
-  const [serviceAreas, setServiceAreas] = useState(() =>
-    sanitizeServiceAreas(readStoredJson(SERVICE_AREAS_STORAGE_KEY, DEFAULT_SERVICE_AREAS))
-  );
   const [sessionPreferences, setSessionPreferences] = useState(() =>
     sanitizeSessionPreferences(
       import.meta.env.DEV
@@ -5090,6 +5111,9 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [adminAuthError, setAdminAuthError] = useState("");
   const [adminSystemMessage, setAdminSystemMessage] = useState("");
+  const areaSettings = useServiceAreaSettings(activeView === "admin" && Boolean(adminSession));
+  const serviceAreas = areaSettings.areas;
+  const setServiceAreas = areaSettings.setDraft;
   const [enhancementSaveStatus, setEnhancementSaveStatus] = useState({ message: "", saving: false, type: "" });
   const [adminBookingsLoaded, setAdminBookingsLoaded] = useState(false);
   const [passwordRecovery, setPasswordRecovery] = useState(initialPasswordRecovery);
@@ -5481,10 +5505,6 @@ function App() {
   }, [coverageZones]);
 
   useEffect(() => {
-    writeStoredJson(SERVICE_AREAS_STORAGE_KEY, sanitizeServiceAreas(serviceAreas));
-  }, [serviceAreas]);
-
-  useEffect(() => {
     cacheWeeklyWorkingSchedule(weeklyWorkingSchedule);
   }, [weeklyWorkingSchedule]);
 
@@ -5759,7 +5779,7 @@ function App() {
 
   function updateServiceArea(areaId, patch) {
     setServiceAreas((current) =>
-      sanitizeServiceAreas(current).map((area) =>
+      current.map((area) =>
         area.id === areaId ? { ...area, ...patch } : area
       )
     );
@@ -5820,19 +5840,19 @@ function App() {
         suffix += 1;
       }
 
-      return sanitizeServiceAreas([
+      return [
         ...current,
         { active: true, congestionFee: 0, custom: true, id, name: trimmedName, travelSurcharge: 0 },
-      ]);
+      ];
     });
   }
 
   function deleteServiceArea(areaId) {
-    const area = serviceAreas.find((item) => item.id === areaId);
+    const area = areaSettings.draft.find((item) => item.id === areaId);
     if (!area?.custom) return;
     const confirmed = window.confirm(`Delete ${area.name}?`);
     if (!confirmed) return;
-    setServiceAreas((current) => sanitizeServiceAreas(current.filter((item) => item.id !== areaId)));
+    setServiceAreas((current) => current.filter((item) => item.id !== areaId));
   }
 
   async function handleClientGoogleLogin() {
@@ -7254,7 +7274,8 @@ function App() {
         <ClientBookingInterface
           coverageZones={coverageZones}
           days={days}
-          serviceAreas={serviceAreas}
+          serviceAreas={areaSettings.ready ? serviceAreas : []}
+          serviceAreasMessage={areaSettings.loading ? "Loading appointment areas..." : !areaSettings.ready || !serviceAreas.length ? "Appointment areas are temporarily unavailable. Please try again later." : ""}
           services={services}
           serviceDetails={serviceDetails}
           enhancements={publicClientEnhancements}
@@ -7340,6 +7361,7 @@ function App() {
                   clientNoteOverrides={clientNoteOverrides}
                   clientProfileOverrides={clientProfileOverrides}
                   serviceAreas={serviceAreas}
+                  areaSettings={areaSettings}
                   sessionPreferences={sessionPreferences}
                   onUpdateSessionPreferences={setSessionPreferences}
                   onCloseWaitlistRequest={closeWaitlistRequest}

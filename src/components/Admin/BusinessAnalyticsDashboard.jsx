@@ -72,7 +72,11 @@ function formatDate(value) {
 function bookingRevenue(booking) {
   if (isPersonalEvent(booking)) return 0;
   if (isFiniteNumber(booking.total)) return Number(booking.total);
-  if (isFiniteNumber(booking.price) && Number(booking.price) > 0) return Number(booking.price);
+  if (isFiniteNumber(booking.price) && Number(booking.price) > 0) {
+    return Number(booking.price)
+      + Number(booking.congestionFee || 0)
+      + Number(booking.travelFee || 0);
+  }
   const itemRevenue = itemsForBooking(booking).reduce((total, item) => total + (Number(item.price) || 0), 0);
   if (itemRevenue > 0) return itemRevenue;
   return Math.round((Number(booking.duration) || 0) * 1.1 + 35);

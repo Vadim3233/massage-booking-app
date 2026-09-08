@@ -139,7 +139,7 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
   assert.match(appSource, /Email remains the main place for your confirmation and reminder\./);
   assert.match(appSource, /confirmation-telegram-start/);
   assert.match(appSource, /open the chat bot and press Start/);
-  assert.match(appSource, /Open Telegram chat bot/);
+  assert.match(appSource, /Open Telegram bot/);
   assert.ok(
     appSource.indexOf("confirmation-telegram-card") < appSource.indexOf("confirmation-payment-details-card"),
     "Telegram setup should appear before bank-transfer details on the confirmation page"

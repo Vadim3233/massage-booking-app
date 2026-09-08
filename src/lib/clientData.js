@@ -797,6 +797,11 @@ export function normalizeClientPortalBooking(row = {}) {
   );
   const sessionNotes = cleanText(booking.sessionNotes) || parsePublicBookingNotes(row, booking);
 
+  const price = Math.max(0, Number(row.price ?? booking.price) || 0);
+  const congestionFee = Math.max(0, Number(row.congestion_fee ?? booking.congestionFee) || 0);
+  const travelFee = Math.max(0, Number(row.travel_fee ?? booking.travelFee) || 0);
+  const total = price + congestionFee + travelFee;
+
   return {
     id: cleanText(row.id || booking.id),
     userId: cleanText(row.user_id || booking.userId),
@@ -823,7 +828,10 @@ export function normalizeClientPortalBooking(row = {}) {
     sessionPreferences: sessionPreferenceLabels(sessionPreferenceIds, undefined, sessionPreferenceLabelsSnapshot),
     paymentMethod: cleanText(row.payment_method || booking.paymentMethod),
     paymentReference: cleanText(booking.paymentReference || booking.bookingReference),
-    price: Math.max(0, Number(row.price ?? booking.price) || 0),
+    congestionFee,
+    price,
+    total,
+    travelFee,
     status,
     paymentStatus,
     cancellationLabel: status === "cancelled" || paymentStatus === "cancelled"
@@ -851,7 +859,10 @@ export function buildClientBookingDetailsViewModel(booking = {}, { userId = "" }
     paymentStatus: booking.paymentStatus,
   });
   const statusLabel = clientBookingStatusLabel(booking);
-  const amount = Math.max(0, Number(booking.price) || 0);
+  const serviceAmount = Math.max(0, Number(booking.price) || 0);
+  const congestionFee = Math.max(0, Number(booking.congestionFee) || 0);
+  const travelFee = Math.max(0, Number(booking.travelFee) || 0);
+  const amount = serviceAmount + congestionFee + travelFee;
   const paymentMethod = cleanText(booking.paymentMethod);
   const paymentReference = cleanText(booking.paymentReference || booking.bookingReference);
 
@@ -875,6 +886,12 @@ export function buildClientBookingDetailsViewModel(booking = {}, { userId = "" }
     paymentMethodLabel: clientPaymentMethodLabel(paymentMethod),
     amount,
     amountLabel: `£${amount.toFixed(2)}`,
+    congestionFee,
+    congestionFeeLabel: congestionFee > 0 ? `£${congestionFee.toFixed(2)}` : "",
+    serviceAmount,
+    serviceAmountLabel: `£${serviceAmount.toFixed(2)}`,
+    travelFee,
+    travelFeeLabel: travelFee > 0 ? `£${travelFee.toFixed(2)}` : "",
     paymentReference,
     confirmationEmail: cleanText(booking.customerEmail) || "Email not provided",
     cancelledAtLabel: formatClientBookingDateTime(booking.cancelledAt),
