@@ -11,7 +11,7 @@ function stepUrl(location, step) {
   return `${location.pathname || "/"}${query ? `?${query}` : ""}${location.hash || ""}`;
 }
 
-export function createBookingStepHistory({ history, location, onStep, steps = CLIENT_BOOKING_HISTORY_STEPS }) {
+export function createBookingStepHistory({ history, location, onExitAttempt, onStep, steps = CLIENT_BOOKING_HISTORY_STEPS }) {
   const allowed = new Set(steps);
   const flowId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const entries = new Map();
@@ -27,7 +27,8 @@ export function createBookingStepHistory({ history, location, onStep, steps = CL
     if (initialized) return;
     currentStep = allowed.has(step) ? step : "location";
     entries.set(0, currentStep);
-    history.replaceState(stateFor(currentStep, 0), "", stepUrl(location, currentStep));
+    history.replaceState({ ...(history.state || {}), [HISTORY_KEY]: { boundary: true, flowId } }, "", stepUrl(location, currentStep));
+    history.pushState(stateFor(currentStep, 0), "", stepUrl(location, currentStep));
     initialized = true;
   }
 
@@ -61,7 +62,15 @@ export function createBookingStepHistory({ history, location, onStep, steps = CL
 
   function handlePopState(event) {
     const entry = event?.state?.[HISTORY_KEY];
-    if (!entry || entry.flowId !== flowId || !allowed.has(entry.step)) return false;
+    if (!entry || entry.flowId !== flowId) return false;
+    if (entry.boundary) {
+      const leave = () => history.back();
+      const stay = () => history.forward();
+      if (onExitAttempt) onExitAttempt({ leave, stay });
+      else leave();
+      return true;
+    }
+    if (!allowed.has(entry.step)) return false;
     currentIndex = entry.index;
     currentStep = entry.step;
     entries.set(currentIndex, currentStep);
@@ -70,4 +79,62 @@ export function createBookingStepHistory({ history, location, onStep, steps = CL
   }
 
   return { handlePopState, initialize, navigate };
+}
+
+export function hasMeaningfulBookingProgress({
+  addressDetails,
+  clientServiceId,
+  clientSelectedSlot,
+  confirmedAppointments,
+  contactDetails,
+  durationQuantitiesByService,
+  paymentSelected,
+  selectedAreaId,
+  selectedEnhancements,
+  selectedSessionPreferenceIds,
+  serviceDurations,
+}) {
+  if (Array.isArray(confirmedAppointments) && confirmedAppointments.length > 0) return false;
+  const hasText = (values) => values.some((value) => String(value || "").trim());
+  return Boolean(
+    selectedAreaId || clientServiceId || clientSelectedSlot || paymentSelected ||
+    Object.values(serviceDurations || {}).some((value) => Number(value) > 0) ||
+    Object.values(durationQuantitiesByService || {}).some((quantities) =>
+      Object.values(quantities || {}).some((value) => Number(value) > 0)
+    ) ||
+    (selectedEnhancements || []).length || (selectedSessionPreferenceIds || []).length ||
+    hasText([
+      contactDetails?.address,
+      contactDetails?.email,
+      contactDetails?.firstName,
+      contactDetails?.lastName,
+      contactDetails?.notes,
+      contactDetails?.phone,
+      addressDetails?.additionalNotes,
+      addressDetails?.apartment,
+      addressDetails?.entryInstructions,
+      addressDetails?.postcode,
+      addressDetails?.streetAddress,
+    ])
+  );
+}
+
+export function createBeforeUnloadProtection(target) {
+  let active = false;
+  const handler = (event) => {
+    event.preventDefault();
+    event.returnValue = "";
+  };
+  return {
+    sync(shouldProtect) {
+      if (Boolean(shouldProtect) === active) return;
+      active = Boolean(shouldProtect);
+      if (active) target.addEventListener("beforeunload", handler);
+      else target.removeEventListener("beforeunload", handler);
+    },
+    dispose() {
+      if (active) target.removeEventListener("beforeunload", handler);
+      active = false;
+    },
+  };
 }

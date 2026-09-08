@@ -154,7 +154,11 @@ import {
   weeklySettingsForDateValue,
 } from "./lib/weeklyWorkingSchedule.js";
 import { buildTelegramStartUrl, normalizeTelegramBotUrl } from "./lib/telegramLinks.js";
-import { createBookingStepHistory } from "./lib/bookingStepHistory.js";
+import {
+  createBeforeUnloadProtection,
+  createBookingStepHistory,
+  hasMeaningfulBookingProgress,
+} from "./lib/bookingStepHistory.js";
 import { ClientEmailSignInForm } from "./components/Client/ClientAccountPanel.jsx";
 import { ClientOnboarding } from "./components/Client/ClientOnboarding.jsx";
 import { useServiceAreaSettings } from "./hooks/useServiceAreaSettings.js";
@@ -1390,11 +1394,22 @@ function ClientBookingInterface({
   })();
   const [clientStep, setClientStepState] = useState(initialClientStep);
   const clientStepRef = useRef(initialClientStep);
+  const bookingInProgressRef = useRef(false);
+  const pendingBookingExitRef = useRef(null);
+  const [bookingExitConfirmationOpen, setBookingExitConfirmationOpen] = useState(false);
   const clientStepHistoryRef = useRef(null);
   if (typeof window !== "undefined" && !clientStepHistoryRef.current) {
     clientStepHistoryRef.current = createBookingStepHistory({
       history: window.history,
       location: window.location,
+      onExitAttempt: ({ leave, stay }) => {
+        if (!bookingInProgressRef.current) {
+          leave();
+          return;
+        }
+        pendingBookingExitRef.current = { leave, stay };
+        setBookingExitConfirmationOpen(true);
+      },
       onStep: (step) => {
         clientStepRef.current = step;
         setClientStepState(step);
@@ -1428,6 +1443,7 @@ function ClientBookingInterface({
   const [confirmedAppointments, setConfirmedAppointments] = useState([]);
   const [confirmationCancellationPending, setConfirmationCancellationPending] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentSelected, setPaymentSelected] = useState(false);
   const [cashPaymentReviewOpen, setCashPaymentReviewOpen] = useState(false);
   const [reservationInactivityModalOpen, setReservationInactivityModalOpen] = useState(false);
   const [reservationInactivityModalOpenedAt, setReservationInactivityModalOpenedAt] = useState(null);
@@ -1558,6 +1574,26 @@ function ClientBookingInterface({
   });
   const [serviceDurations, setServiceDurations] = useState({});
   const [durationQuantitiesByService, setDurationQuantitiesByService] = useState({});
+  const bookingInProgress = hasMeaningfulBookingProgress({
+    addressDetails,
+    clientServiceId,
+    clientSelectedSlot,
+    confirmedAppointments,
+    contactDetails,
+    durationQuantitiesByService,
+    paymentSelected,
+    selectedAreaId,
+    selectedEnhancements,
+    selectedSessionPreferenceIds,
+    serviceDurations,
+  });
+  bookingInProgressRef.current = bookingInProgress;
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const protection = createBeforeUnloadProtection(window);
+    protection.sync(bookingInProgress);
+    return () => protection.dispose();
+  }, [bookingInProgress]);
   const visibleServices = services.filter((service) => service.visible);
   const [fullDescriptionServiceId, setFullDescriptionServiceId] = useState(null);
   const bookingPageRef = useRef(null);
@@ -3045,6 +3081,7 @@ function ClientBookingInterface({
       setConfirmedAppointments(confirmedList);
       setCheckoutAppointments([]);
       resetCurrentAppointmentDraft();
+      setPaymentSelected(false);
       setPaymentMethod(selectedPaymentMethod);
       setClientStep("payment");
       setClientBookingMessage(
@@ -4226,6 +4263,14 @@ function ClientBookingInterface({
                       setBookingReference("");
                       setPaymentHoldExpiresAt(null);
                       setPaymentMethod("cash");
+                      setPaymentSelected(false);
+                      setSelectedAreaId("");
+                      setSelectedSavedAddressId("");
+                      setTermsAccepted(false);
+                      setContactAccepted(false);
+                      setContactNameInput("");
+                      setContactDetails({ address: "", email: "", firstName: "", lastName: "", notes: "", phone: "", telegramUpdates: false });
+                      setAddressDetails({ additionalNotes: "", apartment: "", city: "London", entryInstructions: "", postcode: "", streetAddress: "" });
                       setClientBookingMessage("");
                       resetCurrentAppointmentDraft();
                       setClientStep("location");
@@ -4426,6 +4471,7 @@ function ClientBookingInterface({
                         disabled={paymentActionsDisabled}
                         onClick={() => {
                           setCheckoutError("");
+                          setPaymentSelected(true);
                           setCashPaymentReviewOpen(true);
                         }}
                       >
@@ -4475,6 +4521,40 @@ function ClientBookingInterface({
               </button>
               <button type="button" className="secondary-button" onClick={releaseClientAppointmentReservation}>
                 Release appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bookingExitConfirmationOpen && (
+        <div className="booking-modal-backdrop" role="presentation">
+          <div className="booking-modal" role="dialog" aria-modal="true" aria-labelledby="booking-exit-title">
+            <h2 id="booking-exit-title">Leave booking?</h2>
+            <p>Your booking hasn’t been completed. If you leave now, your entered information may be lost.</p>
+            <div className="reservation-inactivity-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  const pendingExit = pendingBookingExitRef.current;
+                  pendingBookingExitRef.current = null;
+                  setBookingExitConfirmationOpen(false);
+                  pendingExit?.stay();
+                }}
+              >
+                Stay
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  const pendingExit = pendingBookingExitRef.current;
+                  pendingBookingExitRef.current = null;
+                  setBookingExitConfirmationOpen(false);
+                  pendingExit?.leave();
+                }}
+              >
+                Leave
               </button>
             </div>
           </div>
