@@ -39,6 +39,15 @@ export function buildTelegramStartUrl(botUrl, bookingReference) {
   }
 }
 
+export function buildTelegramActivationUrl(botUrl, token) {
+  const normalizedBotUrl = normalizeTelegramBotUrl(botUrl);
+  const activationToken = cleanText(token);
+  if (!normalizedBotUrl || !/^acct_[A-Za-z0-9_-]{43}$/.test(activationToken)) return "";
+  const url = new URL(normalizedBotUrl);
+  url.searchParams.set("start", activationToken);
+  return url.toString();
+}
+
 export function telegramStartPayloadFromMessageText(text) {
   const match = cleanText(text).match(/^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]{1,64}))?$/);
   return match?.[1] || "";

@@ -82,6 +82,7 @@ export function buildAdminCustomers(days, waitlistEntries, getEffectiveWaitlistS
           notes: booking.notes || booking.additionalNotes || "No notes saved yet.",
           phone: booking.customerPhone || "",
           updates: "Created from booking history.",
+          userId: booking.userId || "",
         });
       }
 
@@ -90,6 +91,7 @@ export function buildAdminCustomers(days, waitlistEntries, getEffectiveWaitlistS
       customer.email = customer.email || booking.customerEmail || "";
       customer.phone = customer.phone || booking.customerPhone || "";
       customer.avatarUrl = customer.avatarUrl || booking.avatarUrl || booking.avatar_url || booking.picture || "";
+      customer.userId = customer.userId || booking.userId || "";
       customer.notes = customer.notes === "No notes saved yet." ? (booking.notes || booking.additionalNotes || customer.notes) : customer.notes;
       customer.appointments.push({
         date: day.dateValue,

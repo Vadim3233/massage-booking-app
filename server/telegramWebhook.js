@@ -33,14 +33,15 @@ export function parseTelegramStartUpdate(update = {}) {
   const message = update.message || update.edited_message || {};
   const chat = message.chat || {};
   const from = message.from || {};
-  const bookingReference = telegramStartPayloadFromMessageText(message.text);
+  const startPayload = telegramStartPayloadFromMessageText(message.text);
 
-  if (!bookingReference || !chat.id) {
+  if (!startPayload || !chat.id) {
     return null;
   }
 
   return {
-    bookingReference,
+    startPayload,
+    kind: /^acct_[A-Za-z0-9_-]{43}$/.test(startPayload) ? "account_activation" : "booking_reference",
     chatId: String(chat.id),
     chatType: cleanText(chat.type),
     firstName: cleanText(from.first_name || chat.first_name),
@@ -57,9 +58,10 @@ export async function linkTelegramStartUpdate(update, { supabase = null, sendMes
   }
 
   const client = supabase || getSupabaseServerClient();
-  const { data, error } = await client.rpc("link_telegram_chat_to_booking", {
-    link_payload: {
-      booking_reference: parsed.bookingReference,
+  const accountActivation = parsed.kind === "account_activation";
+  const { data, error } = await client.rpc(accountActivation ? "consume_client_telegram_activation" : "link_telegram_chat_to_booking", {
+    [accountActivation ? "activation_payload" : "link_payload"]: {
+      ...(accountActivation ? { token: parsed.startPayload } : { booking_reference: parsed.startPayload }),
       chat_id: parsed.chatId,
       chat_type: parsed.chatType,
       first_name: parsed.firstName,
@@ -69,20 +71,23 @@ export async function linkTelegramStartUpdate(update, { supabase = null, sendMes
     },
   });
 
-  if (error) throw error;
+  if (error || (accountActivation && data?.linked !== true)) {
+    await sendMessage({ chatId: parsed.chatId, text: "This activation link is no longer available. Please ask for a new link." });
+    return { linked: false, reason: "invalid_or_expired_start" };
+  }
 
   await sendMessage({
     chatId: parsed.chatId,
     text: [
-      "Telegram updates are connected.",
-      `Booking reference: ${parsed.bookingReference}`,
+      accountActivation ? "Telegram is now connected to your client account." : "Telegram updates are connected.",
+      accountActivation ? null : `Booking reference: ${parsed.startPayload}`,
       "I will still use email as the main confirmation and reminder channel.",
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
   });
 
   return {
     bookingId: data?.booking_id || "",
-    bookingReference: parsed.bookingReference,
+    bookingReference: accountActivation ? "" : parsed.startPayload,
     chatId: parsed.chatId,
     linked: true,
   };

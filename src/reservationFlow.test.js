@@ -130,7 +130,9 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
 // Test 0h: Confirmation page explains optional Telegram setup after booking.
 {
   assert.match(appSource, /const CLIENT_TELEGRAM_BOT_URL = normalizeTelegramBotUrl\(import\.meta\.env\.VITE_TELEGRAM_BOT_URL\);/);
-  assert.match(appSource, /const confirmationTelegramUrl = buildTelegramStartUrl\(CLIENT_TELEGRAM_BOT_URL, confirmedPaymentReference\);/);
+  assert.match(appSource, /const confirmationTelegramUrl = clientTelegramConnected \? "" : buildTelegramStartUrl\(CLIENT_TELEGRAM_BOT_URL, confirmedPaymentReference\);/);
+  assert.match(appSource, /get_my_telegram_connection/);
+  assert.match(appSource, /Telegram is already connected to your client account\./);
   assert.match(telegramLinksSource, /export function normalizeTelegramBotUrl\(value\)/);
   assert.ok(telegramLinksSource.includes('url.pathname = url.pathname.replace(/^\\/@/, "/");'));
   assert.match(telegramLinksSource, /url\.searchParams\.set\("start", startPayload\)/);

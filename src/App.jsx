@@ -1406,6 +1406,15 @@ function ClientBookingInterface({
   const [myBookingsError, setMyBookingsError] = useState("");
   const [myBookingsGrouped, setMyBookingsGrouped] = useState(() => groupClientPortalBookings([]));
   const [myBookingsReturnStep, setMyBookingsReturnStep] = useState("location");
+  const [clientTelegramConnected, setClientTelegramConnected] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (!clientSession?.user) { setClientTelegramConnected(false); return () => { active = false; }; }
+    getSupabaseClient().then((client) => client.rpc("get_my_telegram_connection"))
+      .then(({ data, error }) => { if (active && !error) setClientTelegramConnected(data?.connected === true); })
+      .catch(() => { if (active) setClientTelegramConnected(false); });
+    return () => { active = false; };
+  }, [clientSession?.user?.id]);
   useEffect(() => {
     onClientStepChange?.(clientStep);
     if (clientStep !== "payment") {
@@ -1800,7 +1809,7 @@ function ClientBookingInterface({
     return total;
   }, 0);
   const confirmedPaymentReference = bookingReference || confirmedAppointments[0]?.bookingReference || "Pending";
-  const confirmationTelegramUrl = buildTelegramStartUrl(CLIENT_TELEGRAM_BOT_URL, confirmedPaymentReference);
+  const confirmationTelegramUrl = clientTelegramConnected ? "" : buildTelegramStartUrl(CLIENT_TELEGRAM_BOT_URL, confirmedPaymentReference);
   const showConfirmationGoogleSaveCta = shouldShowPostBookingGoogleSaveCta({
     clientSession,
     confirmedAppointments,
@@ -4024,7 +4033,9 @@ function ClientBookingInterface({
                         <ChevronRight aria-hidden="true" size={22} strokeWidth={1.8} />
                       </a>
                     ) : (
-                      <p className="confirmation-telegram-note">Telegram updates are currently unavailable. Your booking updates will arrive by email.</p>
+                      <p className="confirmation-telegram-note">{clientTelegramConnected
+                        ? "Telegram is already connected to your client account."
+                        : "Telegram updates are currently unavailable. Your booking updates will arrive by email."}</p>
                     )}
                   </div>
                 </section>

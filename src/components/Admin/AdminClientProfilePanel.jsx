@@ -17,6 +17,7 @@ import {
   customerTotalSpent,
 } from "../../lib/customerDisplay.js";
 import { fullDateLabel } from "../../lib/dateTime.js";
+import { AdminClientTelegramPanel } from "./AdminClientTelegramPanel.jsx";
 
 export function AdminClientProfilePanel({
   activeSection,
@@ -93,6 +94,8 @@ export function AdminClientProfilePanel({
           </button>
         </div>
       </section>
+
+      <AdminClientTelegramPanel userId={customer.userId} />
 
       {editOpen && (
         <form className="client-profile-edit-panel" onSubmit={onSaveProfile}>

@@ -16,11 +16,8 @@ export default async function handler(request, response) {
     response.status(200).json(result);
   } catch (error) {
     console.error("Telegram webhook failed", {
-      error: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : "Error",
     });
-    response.status(400).json({
-      error: error instanceof Error ? error.message : "Telegram webhook failed",
-      linked: false,
-    });
+    response.status(200).json({ linked: false, reason: "start_unavailable" });
   }
 }

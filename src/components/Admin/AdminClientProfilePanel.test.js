@@ -153,8 +153,9 @@ async function loadAdminClientProfilePanel() {
     { loader: "jsx" },
   );
   const require = createRequire(import.meta.url);
-  new Function("React", "Activity", "CalendarDays", "ChevronLeft", "Mail", "MapPin", "MessageCircle", "MoreHorizontal", "Phone", "Star", "WalletCards", "customerInitials", "customerPreferredServiceShort", "customerTotalSpent", "fullDateLabel", "require", transformed.code)(
-    React, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, customerInitials, customerPreferredServiceShort, customerTotalSpent, fullDateLabel, require,
+  const AdminClientTelegramPanel = ({ userId }) => h("section", { "aria-label": "Telegram connection" }, userId ? "Telegram account controls" : "Telegram account required");
+  new Function("React", "Activity", "CalendarDays", "ChevronLeft", "Mail", "MapPin", "MessageCircle", "MoreHorizontal", "Phone", "Star", "WalletCards", "customerInitials", "customerPreferredServiceShort", "customerTotalSpent", "fullDateLabel", "AdminClientTelegramPanel", "require", transformed.code)(
+    React, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, Icon, customerInitials, customerPreferredServiceShort, customerTotalSpent, fullDateLabel, AdminClientTelegramPanel, require,
   );
   return { AdminClientProfilePanel: globalThis.__AdminClientProfilePanelLoaded, hasComponent: true, source };
 }
@@ -303,13 +304,13 @@ if (hasComponent) {
   element.props.children[0].props.children[2].props.onClick("ignored");
   element.props.children[1].props.children[2].props.children[0].props.onClick();
   element.props.children[1].props.children[2].props.children[3].props.onClick();
-  element.props.children[2].props.children[0].props.children[1].props.onChange({ target: { value: "New Name" } });
-  element.props.children[2].props.children[5].props.children[1].props.onClick("ignored");
-  element.props.children[2].props.children[6].props.onClick();
-  element.props.children[4].props.children[1].props.onClick();
-  element.props.children[5].props.children[1].props.children[0].props.onChange({ target: { value: "Changed" } });
-  element.props.children[5].props.children[1].props.children[1].props.children[0].props.onClick("ignored");
-  element.props.children[5].props.children[1].props.children[2].props.children[0].props.children[1].props.onClick();
+  element.props.children[3].props.children[0].props.children[1].props.onChange({ target: { value: "New Name" } });
+  element.props.children[3].props.children[5].props.children[1].props.onClick("ignored");
+  element.props.children[3].props.children[6].props.onClick();
+  element.props.children[5].props.children[1].props.onClick();
+  element.props.children[6].props.children[1].props.children[0].props.onChange({ target: { value: "Changed" } });
+  element.props.children[6].props.children[1].props.children[1].props.children[0].props.onClick("ignored");
+  element.props.children[6].props.children[1].props.children[2].props.children[0].props.children[1].props.onClick();
   assert.equal(calls[0][0], "back");
   assert.equal(calls[1][0], "toggle");
   assert.deepEqual(calls[2].slice(0, 2), ["contact", "call"]);

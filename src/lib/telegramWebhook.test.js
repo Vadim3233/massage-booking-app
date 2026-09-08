@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildTelegramStartUrl, telegramStartPayloadFromMessageText } from "./telegramLinks.js";
+import { buildTelegramActivationUrl, buildTelegramStartUrl, telegramStartPayloadFromMessageText } from "./telegramLinks.js";
 import { linkTelegramStartUpdate, parseTelegramStartUpdate } from "../../server/telegramWebhook.js";
 
 {
@@ -21,7 +21,8 @@ import { linkTelegramStartUpdate, parseTelegramStartUpdate } from "../../server/
   });
 
   assert.deepEqual(parsed, {
-    bookingReference: "VDM-20260731-1200",
+    startPayload: "VDM-20260731-1200",
+    kind: "booking_reference",
     chatId: "123456789",
     chatType: "private",
     firstName: "Client",
@@ -76,6 +77,37 @@ import { linkTelegramStartUpdate, parseTelegramStartUpdate } from "../../server/
   );
   assert.equal(result.ignored, true);
   assert.equal(result.linked, false);
+}
+
+{
+  const token = "acct_" + "A".repeat(43);
+  assert.equal(buildTelegramActivationUrl("https://t.me/vadmassagebookingbot", token), "https://t.me/vadmassagebookingbot?start=" + token);
+  assert.equal(buildTelegramActivationUrl("", token), "");
+  assert.equal(buildTelegramActivationUrl("https://example.com/bot", token), "");
+  const calls = [], replies = [];
+  const result = await linkTelegramStartUpdate(
+    { message: { text: "/start " + token, chat: { id: 22, type: "private" }, from: { id: 33, username: "client" } } },
+    {
+      supabase: { rpc: async (name, args) => { calls.push({ name, args }); return { data: { linked: true, status: "CONNECTED" } }; } },
+      sendMessage: async (message) => { replies.push(message); return { sent: true }; },
+    }
+  );
+  assert.equal(result.linked, true);
+  assert.equal(calls[0].name, "consume_client_telegram_activation");
+  assert.equal(calls[0].args.activation_payload.token, token);
+  assert.match(replies[0].text, /connected to your client account/);
+
+  const invalidReplies = [];
+  const invalid = await linkTelegramStartUpdate(
+    { message: { text: "/start " + token, chat: { id: 44, type: "private" } } },
+    {
+      supabase: { rpc: async () => ({ data: { linked: false, status: "INVALID" } }) },
+      sendMessage: async (message) => { invalidReplies.push(message); return { sent: true }; },
+    }
+  );
+  assert.equal(invalid.linked, false);
+  assert.match(invalidReplies[0].text, /could not be loaded|stop working|no longer|new link/i);
+  assert.doesNotMatch(invalidReplies[0].text, /uuid|sql|client id/i);
 }
 
 console.log("Telegram webhook tests passed.");

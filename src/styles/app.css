@@ -8642,6 +8642,35 @@ label {
   font-weight: 800;
 }
 
+.client-telegram-section {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: 14px;
+  background: var(--ds-surface);
+}
+
+.client-telegram-heading,
+.client-telegram-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.client-telegram-heading h3 { margin: 0; }
+.client-telegram-status { font-size: 0.82rem; }
+.client-telegram-status.connected { color: var(--ds-success-text, #17633b); }
+.client-telegram-status.pending { color: var(--ds-warning-text, #805600); }
+.client-telegram-link input { min-width: 0; flex: 1; }
+.client-telegram-section button { min-height: 44px; }
+.client-telegram-confirm { margin-top: 12px; }
+
+@media (max-width: 420px) {
+  .client-telegram-link { align-items: stretch; flex-direction: column; }
+  .client-telegram-link button { width: 100%; }
+}
+
 .day-settings-sheet-actions button {
   min-height: 54px;
   border-radius: 12px;
