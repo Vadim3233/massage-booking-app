@@ -1,37 +1,56 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabaseClient.js";
+import {
+  CLIENT_AUTH_MESSAGES,
+  CLIENT_PASSWORD_MIN_LENGTH,
+  runSingleClientAuthSubmission,
+  validateClientCredentials,
+  validateClientEmail,
+} from "../../lib/clientAuthValidation.js";
 import "../../styles/clientAccess.css";
 
 const BLOCKED_MESSAGE = "Online booking is currently unavailable for this account. Please contact me.";
-
-function validEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
-}
 
 function AuthForm({ busy, error, notice, onForgot, onGoogle, onSignIn, onSignUp, onSwitchAdmin }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const submit = (event) => {
+  const [validationError, setValidationError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submissionLock = useRef(false);
+  const validation = validateClientCredentials(email, password);
+  const isBusy = busy || submitting;
+  const submit = async (event) => {
     event.preventDefault();
-    if (!validEmail(email) || password.length < 8) return;
-    void (mode === "signup" ? onSignUp(email, password) : onSignIn(email, password));
+    const result = validateClientCredentials(email, password);
+    if (!result.valid) { setValidationError(result.error); return; }
+    setValidationError("");
+    try {
+      await runSingleClientAuthSubmission(
+        submissionLock,
+        () => mode === "signup" ? onSignUp(result.email, result.password) : onSignIn(result.email, result.password),
+        setSubmitting,
+      );
+    } catch {
+      setValidationError(mode === "signup" ? CLIENT_AUTH_MESSAGES.registrationFailed : CLIENT_AUTH_MESSAGES.signInFailed);
+    }
   };
   return <section className="client-access-page client-auth-entry" aria-label="Client account sign in">
     <p className="eyebrow">VadMassage</p><h1>{mode === "signup" ? "Create your account" : "Welcome"}</h1>
     <p>{mode === "signup" ? "Create your private account before booking." : "Sign in to book or manage your appointments."}</p>
-    <button type="button" className="google-login-button" disabled={busy} onClick={onGoogle}><span aria-hidden="true">G</span> Continue with Google</button>
-    <form onSubmit={submit}>
-      <label>Email address<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} /></label>
-      <label>Password<input type="password" minLength={8} autoComplete={mode === "signup" ? "new-password" : "current-password"} required value={password} onChange={e => setPassword(e.target.value)} /></label>
-      <button disabled={busy || !validEmail(email) || password.length < 8}>{busy ? "Please wait..." : mode === "signup" ? "Create account" : "Sign in with email"}</button>
+    <button type="button" className="google-login-button" disabled={isBusy} onClick={onGoogle}><span aria-hidden="true">G</span> Continue with Google</button>
+    <form noValidate onSubmit={submit}>
+      <label>Email address<input type="email" autoComplete="email" aria-required="true" value={email} onBlur={() => setValidationError(validateClientEmail(email).error)} onChange={e => { setEmail(e.target.value); setValidationError(""); }} /></label>
+      <label>Password<input type="password" minLength={CLIENT_PASSWORD_MIN_LENGTH} autoComplete={mode === "signup" ? "new-password" : "current-password"} aria-required="true" value={password} onBlur={() => { if (validateClientEmail(email).valid) setValidationError(validateClientCredentials(email, password).error); }} onChange={e => { setPassword(e.target.value); setValidationError(""); }} /></label>
+      {mode === "signup" && <p className="client-account-notice">Use at least {CLIENT_PASSWORD_MIN_LENGTH} characters.</p>}
+      <button disabled={isBusy || !validation.valid}>{isBusy ? "Please wait..." : mode === "signup" ? "Create account" : "Sign in with email"}</button>
     </form>
     <div className="client-account-button-row">
-      <button type="button" className="secondary-button" onClick={() => setMode(mode === "signup" ? "signin" : "signup")}>{mode === "signup" ? "Sign in instead" : "Create account"}</button>
-      <button type="button" className="secondary-button" disabled={busy || !validEmail(email)} onClick={() => onForgot(email)}>Forgot password</button>
+      <button type="button" className="secondary-button" disabled={isBusy} onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setValidationError(""); }}>{mode === "signup" ? "Sign in instead" : "Create account"}</button>
+      <button type="button" className="secondary-button" disabled={isBusy || !validateClientEmail(email).valid} onClick={() => onForgot(email.trim().toLowerCase())}>Forgot password</button>
     </div>
     {notice && <p role="status" className="client-account-notice">{notice}</p>}
-    {error && <p role="alert" className="client-account-error">{error}</p>}
+    {(validationError || error) && <p role="alert" className="client-account-error">{validationError || error}</p>}
     {import.meta.env.DEV && <button type="button" className="secondary-button" onClick={onSwitchAdmin}>Admin</button>}
   </section>;
 }

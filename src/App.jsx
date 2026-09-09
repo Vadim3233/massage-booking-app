@@ -235,6 +235,11 @@ import {
   telegramTestErrorMessage,
 } from "./lib/notifications.js";
 import { buildClientAuthRedirectUrl, buildClientRecoveryRedirectUrl } from "./lib/authRedirect.js";
+import {
+  mapClientRegistrationError,
+  mapClientSignInError,
+  validateClientCredentials,
+} from "./lib/clientAuthValidation.js";
 import { clearObsoleteClientSessionStorage } from "./lib/obsoleteClientStorage.js";
 import {
   getClientEnhancements,
@@ -5934,31 +5939,30 @@ function App() {
   async function handleClientEmailLogin(email, password) {
     setClientAuthError("");
     setClientAuthNotice("");
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setClientAuthError("Please enter a valid email address.");
-      return;
-    }
+    const validation = validateClientCredentials(email, password);
+    if (!validation.valid) { setClientAuthError(validation.error); return; }
 
     setClientAuthActionLoading(true);
     try {
       const { signInClientWithEmailPassword } = await import("./supabaseClient.js");
-      await signInClientWithEmailPassword(normalizedEmail, password);
+      await signInClientWithEmailPassword(validation.email, validation.password);
     } catch (error) {
-      const message = friendlyClientAuthError(error, "I couldn't sign you in. Please check your email and password.");
-      setClientAuthError(message);
+      setClientAuthError(mapClientSignInError(error));
     } finally {
       setClientAuthActionLoading(false);
     }
   }
 
   async function handleClientEmailRegistration(email, password) {
-    setClientAuthError(""); setClientAuthNotice(""); setClientAuthActionLoading(true);
+    setClientAuthError(""); setClientAuthNotice("");
+    const validation = validateClientCredentials(email, password);
+    if (!validation.valid) { setClientAuthError(validation.error); return; }
+    setClientAuthActionLoading(true);
     try {
       const { registerClientWithEmailPassword } = await import("./supabaseClient.js");
-      const result = await registerClientWithEmailPassword(String(email).trim().toLowerCase(), password, buildClientAuthRedirectUrl());
+      const result = await registerClientWithEmailPassword(validation.email, validation.password, buildClientAuthRedirectUrl());
       if (!result.session) setClientAuthNotice("Check your email to confirm your account, then sign in.");
-    } catch (error) { setClientAuthError(friendlyClientAuthError(error, "I couldn't create your account just now.")); }
+    } catch (error) { setClientAuthError(mapClientRegistrationError(error)); }
     finally { setClientAuthActionLoading(false); }
   }
 
