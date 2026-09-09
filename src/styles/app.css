@@ -24592,3 +24592,185 @@ small,
   color: #8c5a14 !important;
   background: #fffaf1;
 }
+
+/* Admin phone layout: keep primary navigation and editable schedules comfortably within the viewport. */
+@media (max-width: 760px) {
+  .admin-app-shell,
+  .admin-topbar,
+  .admin-main-surface,
+  .admin-screen,
+  .admin-date-strip,
+  .admin-settings-section,
+  .settings-folder-shell,
+  .settings-current-content,
+  .weekly-working-schedule,
+  .weekly-working-list,
+  .weekly-working-day,
+  .weekly-working-details,
+  .day-settings-sheet,
+  .day-settings-sheet-body {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-topbar {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .admin-topbar > div {
+    min-width: 0;
+  }
+
+  .admin-topbar h1,
+  .admin-topbar p,
+  .admin-view-subtitle {
+    overflow-wrap: anywhere;
+  }
+
+  .admin-topbar .top-action-cluster,
+  .admin-topbar .admin-client-link {
+    min-width: 0;
+  }
+
+  .admin-topbar .admin-client-link {
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+
+  .admin-bottom-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .admin-bottom-nav .admin-nav-tab-analytics,
+  .admin-bottom-nav .admin-nav-tab-settings {
+    display: none;
+  }
+
+  .admin-tab-settings .admin-main-surface,
+  .admin-tab-settings .admin-screen,
+  .admin-tab-settings .settings-folder-shell,
+  .admin-tab-settings .settings-current-content,
+  .admin-tab-settings .admin-settings-section {
+    overflow-x: visible;
+  }
+
+  .weekly-working-summary {
+    grid-template-columns: 44px auto minmax(0, 1fr) 24px;
+    grid-template-areas:
+      "day day day chevron"
+      "toggle status hours chevron";
+    gap: 7px 9px;
+    min-height: 78px;
+    padding: 10px 12px;
+  }
+
+  .weekly-working-summary strong {
+    grid-area: day;
+    min-width: 0;
+  }
+
+  .weekly-working-toggle-control {
+    grid-area: toggle;
+    width: 42px;
+    height: 44px;
+  }
+
+  .weekly-working-status {
+    grid-area: status;
+  }
+
+  .weekly-working-hours {
+    grid-area: hours;
+    justify-self: end;
+    min-width: 0;
+    white-space: normal;
+    text-align: right;
+  }
+
+  .weekly-working-chevron {
+    grid-area: chevron;
+    align-self: center;
+  }
+
+  .weekly-working-details > * {
+    min-width: 0;
+  }
+
+  .weekly-working-field-row,
+  .weekly-working-select-row,
+  .weekly-working-day-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .weekly-working-field-row label,
+  .weekly-working-select-row,
+  .weekly-working-details input,
+  .weekly-working-details select,
+  .weekly-working-day-actions button {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .weekly-working-footer {
+    align-items: start;
+  }
+
+  .weekly-working-footer .admin-primary-action {
+    min-height: 52px;
+  }
+
+  .weekly-working-footer .admin-danger-option {
+    justify-self: start;
+    width: fit-content;
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+
+  .day-settings-sheet-header > div,
+  .day-settings-toggle-card > span,
+  .day-settings-choice > span,
+  .day-settings-time-grid label {
+    min-width: 0;
+  }
+
+  .day-settings-time-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .day-settings-time-grid select,
+  .day-settings-inline-time select,
+  .day-settings-inline-time input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 390px) {
+  .admin-topbar,
+  .admin-main-surface {
+    padding-inline: 12px;
+  }
+
+  .admin-tab-calendar .admin-date-strip {
+    padding-inline: 12px;
+  }
+
+  .admin-topbar h1 {
+    font-size: 1.75rem;
+  }
+
+  .weekly-working-copy-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .day-settings-inline-time {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -5085,6 +5085,15 @@ export function LiveAdminWorkspace({
             </section>
             <section>
               <h3>Settings</h3>
+              <button type="button" className="admin-menu-row" onClick={() => {
+                setActiveTab("settings");
+                setSelectedSettingsCategory(null);
+                setSelectedSettingsSubsection(null);
+                setSettingsReturnCategory(null);
+                setSideMenuOpen(false);
+              }}>
+                All settings
+              </button>
               <button type="button" className="admin-menu-row" onClick={() => openSettingsSection("admin-working-rules")}>
                 Working rules
               </button>
@@ -5241,16 +5250,6 @@ export function LiveAdminWorkspace({
                   <p>Working Hours</p>
                   <h2>Weekly working schedule</h2>
                   <small>Set your availability and scheduling rules for each day.</small>
-                </div>
-                <div className="weekly-working-heading-actions">
-                  <button
-                    type="button"
-                    className="admin-primary-action"
-                    disabled={!workingRulesDirty || weeklyWorkingSaving}
-                    onClick={saveWorkingRules}
-                  >
-                    {workingScheduleSaveLabel()}
-                  </button>
                 </div>
               </div>
 
@@ -5666,7 +5665,7 @@ export function LiveAdminWorkspace({
           return (
             <button
               type="button"
-              className={activeTab === tab.id ? "active-admin-tab" : ""}
+              className={[`admin-nav-tab-${tab.id}`, activeTab === tab.id ? "active-admin-tab" : ""].filter(Boolean).join(" ")}
               key={tab.id}
               onClick={() => {
                 if (tab.id === "calendar") {
