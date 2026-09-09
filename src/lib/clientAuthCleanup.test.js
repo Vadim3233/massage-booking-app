@@ -16,7 +16,7 @@ test("only obsolete client-flow session keys are cleared", () => {
 });
 test("auth helpers use Google and email/password APIs", () => {
   const source=readFileSync(new URL("../supabaseClient.js",import.meta.url),"utf8");
-  for(const api of ["signInWithOAuth","signInWithPassword","signUp","resetPasswordForEmail","updateUser"]) assert.match(source,new RegExp(api));
+  for(const api of ["signInWithOAuth","signInWithPassword","signUp","resend","resetPasswordForEmail","updateUser"]) assert.match(source,new RegExp(api));
   assert.doesNotMatch(source,/signInWithOtp/);
 });
 test("legacy invitation entry and duplicate signed-out controls are absent", () => {
@@ -32,4 +32,12 @@ test("legacy invitation entry and duplicate signed-out controls are absent", () 
 test("Telegram client linking remains present", () => {
   const admin=readFileSync(new URL("../components/Admin/AdminClientTelegramPanel.jsx",import.meta.url),"utf8");
   assert.match(admin,/admin_create_client_telegram_invitation/);
+});
+
+test("client and Admin password recovery remain separate", () => {
+  const app = readFileSync(new URL("../App.jsx", import.meta.url), "utf8");
+  const admin = readFileSync(new URL("../components/Admin/AdminLogin.jsx", import.meta.url), "utf8");
+  assert.match(app, /requestClientPasswordRecovery/);
+  assert.match(app, /requestAdminPasswordRecovery/);
+  assert.match(admin, /onRequestPasswordRecovery/);
 });

@@ -40,12 +40,25 @@ export async function signInClientWithEmailPassword(email, password) {
   return data;
 }
 
-export async function registerClientWithEmailPassword(email, password, redirectTo) {
+export async function registerClientWithEmailPassword(email, password, redirectTo, profile = {}) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { emailRedirectTo: redirectTo },
+    options: {
+      emailRedirectTo: redirectTo,
+      data: {
+        first_name: String(profile.first_name || "").trim(),
+        last_name: String(profile.last_name || "").trim(),
+        mobile: String(profile.mobile || "").trim(),
+      },
+    },
   });
+  if (error) throw error;
+  return data;
+}
+
+export async function resendClientSignupVerification(email, redirectTo) {
+  const { data, error } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: redirectTo } });
   if (error) throw error;
   return data;
 }
