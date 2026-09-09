@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test, after } from "node:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { adminId, adminEmail, validProfile, fixtureSql, migrationSql } from "../
 import { bookingFixtureSql, stage2Sql } from "../src/lib/testSupport/clientBookingAccessFixture.js";
 
 const withBookingAccess = process.argv.includes("--booking-access");
+const selfRegistrationSql = await readFile(new URL("../supabase/migrations/20260908140000_enable_client_self_registration.sql", import.meta.url), "utf8");
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const portableBin = join(repositoryRoot, ".tools", "postgresql-18.6", "pgsql", "bin");
@@ -90,12 +91,11 @@ async function user() {
   await sql(`insert into auth.users values (${literal(actor.id)},${literal(actor.email)},now());`);
   return actor;
 }
-const invite = () => rpc(admin, "admin_create_client_invitation", []);
-const acceptance = (invitation) => rpcText("accept_client_invitation", [invitation.token, JSON.stringify(validProfile)]);
+const activation = (profile = validProfile) => rpcText("activate_my_client_account", [JSON.stringify(profile)]);
 async function admitted() {
-  const actor = await user(), invitation = await invite();
-  await rpc(actor, "accept_client_invitation", [invitation.token, JSON.stringify(validProfile)]);
-  return { actor, invitation };
+  const actor = await user();
+  await rpc(actor, "activate_my_client_account", [JSON.stringify(validProfile)]);
+  return { actor };
 }
 async function waitUntilSleeping(label) {
   for (let i = 0; i < 100; i++) {
@@ -142,6 +142,7 @@ try {
   } else {
     await sql(fixtureSql());
     await sql(migrationSql);
+    await sql(selfRegistrationSql);
   }
 } catch (error) {
   await cleanup();
@@ -149,57 +150,47 @@ try {
 }
 after(cleanup);
 
-test("two accounts racing one invitation: exactly one is admitted", async () => {
-  const first = await user(), second = await user(), invitation = await invite();
-  rejected(await race(first, acceptance(invitation), second, acceptance(invitation)), /already been linked/);
-  assert.equal(await sql(`select count(*) from client_access_private.client_access where invitation_id=${literal(invitation.id)};`), "1");
-  assert.equal(await sql(`select count(*) from public.client_profiles where user_id=${literal(second.id)};`), "0");
+test("concurrent first activation creates one ACTIVE account and one event", async () => {
+  const actor = await user();
+  assert.ok(!(await race(actor, activation(), actor, activation())).error);
+  assert.equal(await sql(`select count(*) from client_access_private.client_access where user_id=${literal(actor.id)} and status='ACTIVE' and admission_source='SELF_REGISTRATION';`), "1");
+  assert.equal(await sql(`select count(*) from client_access_private.client_access_events where user_id=${literal(actor.id)} and event_type='ACCESS_ACTIVATED';`), "1");
 });
 
-test("same account racing different invitations: second invitation remains unused", async () => {
-  const actor = await user(), first = await invite(), second = await invite();
-  rejected(await race(actor, acceptance(first), actor, acceptance(second)), /already admitted/);
-  assert.equal(await sql(`select state from client_access_private.client_invitations where id=${literal(second.id)};`), "UNUSED");
+test("repeated activation is idempotent and ACTIVE remains ACTIVE", async () => {
+  const { actor } = await admitted();
+  await rpc(actor, "activate_my_client_account", [JSON.stringify({ ...validProfile, mobile: "+447700900999" })]);
+  const access = await rpc(actor, "get_my_client_access", []);
+  assert.equal(access.status, "ACTIVE");
+  assert.equal(await sql(`select count(*) from client_access_private.client_access_events where user_id=${literal(actor.id)} and event_type='ACCESS_ACTIVATED';`), "1");
 });
 
-test("same-account concurrent retry succeeds without duplicate admission events", async () => {
-  const actor = await user(), invitation = await invite();
-  assert.ok(!(await race(actor, acceptance(invitation), actor, acceptance(invitation))).error);
-  assert.equal(await sql(`select count(*) from client_access_private.client_access_events where user_id=${literal(actor.id)};`), "2");
-});
-
-test("revocation winning the lock prevents pending admission", async () => {
-  const actor = await user(), invitation = await invite();
-  rejected(await race(admin, rpcText("admin_revoke_client_invitation", [invitation.id]), actor, acceptance(invitation)), /no longer available/);
-  assert.equal((await rpc(actor, "get_my_client_access", [])).status, null);
-});
-
-test("admission winning the lock makes concurrent revocation refuse the linked invitation", async () => {
-  const actor = await user(), invitation = await invite();
-  rejected(await race(actor, acceptance(invitation), admin, rpcText("admin_revoke_client_invitation", [invitation.id])), /linked invitation/);
-  assert.equal((await rpc(actor, "get_my_client_access", [])).status, "ACTIVE");
-});
-
-test("blocking and fresh invitation redemption serialize on the same user", async () => {
-  const { actor } = await admitted(), invitation = await invite();
-  rejected(await race(admin, rpcText("admin_block_client", [actor.id]), actor, acceptance(invitation)), /blocked/);
+test("BLOCKED is never reactivated", async () => {
+  const { actor } = await admitted();
+  await rpc(admin, "admin_block_client", [actor.id, "Concurrency test"]);
+  await assert.rejects(rpc(actor, "activate_my_client_account", [JSON.stringify(validProfile)]), /blocked/);
   assert.equal((await rpc(actor, "get_my_client_access", [])).status, "BLOCKED");
 });
 
-test("block waiting for first admission sees the new access row and leaves it BLOCKED", async () => {
-  const actor = await user(), invitation = await invite();
-  assert.ok(!(await race(actor, acceptance(invitation), admin, rpcText("admin_block_client", [actor.id]))).error);
+test("block waiting for first activation sees the row and leaves it BLOCKED", async () => {
+  const actor = await user();
+  assert.ok(!(await race(actor, activation(), admin, rpcText("admin_block_client", [actor.id]))).error);
   assert.equal((await rpc(actor, "get_my_client_access", [])).status, "BLOCKED");
 });
 
-test("expiry is rechecked after a lock wait, not using transaction-start time", async () => {
-  const actor = await user(), invitation = await invite();
-  rejected(await race(null, `update client_access_private.client_invitations set expires_at=clock_timestamp()+interval '1 second' where id=${literal(invitation.id)};`, actor, acceptance(invitation)), /no longer available/);
-  assert.equal((await rpc(actor, "get_my_client_access", [])).status, null);
+test("blocking first prevents a waiting activation from restoring access", async () => {
+  const { actor } = await admitted();
+  rejected(await race(admin, rpcText("admin_block_client", [actor.id, "Concurrency test"]), actor, activation()), /blocked/);
+  assert.equal((await rpc(actor, "get_my_client_access", [])).status, "BLOCKED");
+});
+
+test("Admin identity cannot activate as a client", async () => {
+  await assert.rejects(rpc(admin, "activate_my_client_account", [JSON.stringify(validProfile)]), /Admin accounts/);
+  assert.equal(await sql(`select count(*) from client_access_private.client_access where user_id=${literal(admin.id)};`), "0");
 });
 
 // Same observed multi-session lock test, now through the real final mutation RPCs.
-// Run in a separate fresh cluster with --booking-access; retain all eight Stage 1 tests.
+// Run in a separate fresh cluster with --booking-access; retain the activation tests above.
 if (withBookingAccess) {
   let day = 2;
   for (const operation of ['order', 'hold', 'booking']) {

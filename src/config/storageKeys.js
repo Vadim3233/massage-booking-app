@@ -15,6 +15,4 @@ export const EXPENSES_STORAGE_KEY = "chainScheduler.expenses";
 export const CLIENT_NOTES_STORAGE_KEY = "chainScheduler.clientNotes";
 export const CLIENT_PROFILES_STORAGE_KEY = "chainScheduler.clientProfiles";
 export const DOCUMENT_SETTINGS_STORAGE_KEY = "chainScheduler.documentSettings";
-export const RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY = "chainScheduler.recentGuestBookingContext";
 export const BOOKING_HOLD_CLIENT_KEY_STORAGE_KEY = "chainScheduler.bookingHoldClientKey";
-export const RECENT_GUEST_BOOKING_CONTEXT_TTL_MS = 2 * 60 * 60 * 1000;

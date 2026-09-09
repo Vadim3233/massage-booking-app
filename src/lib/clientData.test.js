@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import {
   bookingRowToSelection,
   buildClientBookingDetailsViewModel,
@@ -11,7 +11,6 @@ import {
   cancelCurrentClientBooking,
   ensureCurrentClientBookingAddress,
   groupClientPortalBookings,
-  linkRecentGuestBookingToCurrentClient,
   listCurrentClientPortalBookings,
   normalizeClientPortalBooking,
   normalizeClientAddress,
@@ -19,7 +18,6 @@ import {
   normalizeClientProfile,
   profileInputFromAuthUser,
   rescheduleCurrentClientBooking,
-  shouldShowPostBookingGoogleSaveCta,
   upsertCurrentClientProfile,
 } from "./clientData.js";
 
@@ -107,19 +105,6 @@ assert.deepEqual(authenticatedLink.selected_durations, [
   { service_id: "sports-massage", duration_minutes: 90 },
   { service_id: "aftercare", duration_minutes: 0 },
 ]);
-
-assert.equal(shouldShowPostBookingGoogleSaveCta({
-  clientSession: null,
-  confirmedAppointments: [{ id: bookingId }],
-}), true);
-assert.equal(shouldShowPostBookingGoogleSaveCta({
-  clientSession: { user: { id: userId } },
-  confirmedAppointments: [{ id: bookingId }],
-}), false);
-assert.equal(shouldShowPostBookingGoogleSaveCta({
-  clientSession: null,
-  confirmedAppointments: [],
-}), false);
 
 assert.deepEqual(profileInputFromAuthUser({
   id: userId,
@@ -305,146 +290,6 @@ await assert.rejects(
   }),
   /signed-in client is required/
 );
-
-{
-  const calls = [];
-  const linkClient = {
-    auth: {
-      getUser: async () => ({
-        data: {
-          user: {
-            id: userId,
-            email: "google@example.com",
-            user_metadata: { full_name: "" },
-          },
-        },
-        error: null,
-      }),
-    },
-    rpc(name, payload) {
-      calls.push({ rpc: name, payload });
-      return Promise.resolve({ data: [bookingId], error: null });
-    },
-    from(table) {
-      calls.push({ table });
-      return {
-        select() {
-          if (table === "client_profiles") {
-            return {
-              eq(column, value) {
-                calls.push({ eq: [column, value] });
-                return {
-                  maybeSingle: async () => ({
-                    data: {
-                      user_id: userId,
-                      full_name: "Existing Client",
-                      email: "google@example.com",
-                      phone: "07123 456789",
-                    },
-                    error: null,
-                  }),
-                };
-              },
-            };
-          }
-
-          const listQuery = {
-            eq(column, value) {
-              calls.push({ eq: [column, value] });
-              return listQuery;
-            },
-            order(column, options) {
-              calls.push({ order: [column, options] });
-              return listQuery;
-            },
-            then(resolve, reject) {
-              return Promise.resolve({ data: [], error: null }).then(resolve, reject);
-            },
-          };
-          return listQuery;
-        },
-        update(payload) {
-          calls.push({ update: payload });
-          const updateQuery = {
-            eq(column, value) {
-              calls.push({ eq: [column, value] });
-              return updateQuery;
-            },
-            then(resolve, reject) {
-              return Promise.resolve({ error: null }).then(resolve, reject);
-            },
-          };
-          return updateQuery;
-        },
-        upsert(payload) {
-          calls.push({ upsert: table, payload });
-          return {
-            select() {
-              return {
-                single: async () => {
-                  if (table === "client_addresses") {
-                    return {
-                      data: {
-                        id: addressId,
-                        user_id: payload.user_id,
-                        label: payload.label,
-                        address_line_1: payload.address_line_1,
-                        address_line_2: payload.address_line_2,
-                        city: payload.city,
-                        postcode: payload.postcode,
-                        area: payload.area,
-                        instructions: payload.instructions,
-                        is_default: payload.is_default,
-                      },
-                      error: null,
-                    };
-                  }
-
-                  return {
-                    data: {
-                      user_id: payload.user_id,
-                      full_name: payload.full_name,
-                      email: payload.email,
-                      phone: payload.phone,
-                    },
-                    error: null,
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
-    },
-  };
-
-  const result = await linkRecentGuestBookingToCurrentClient({
-    bookings: [{ id: bookingId, bookingReference: "VDM-20260703-ABC" }],
-    customer: {
-      email: "guest@example.com",
-      name: "Maya Shah",
-      phone: "",
-    },
-    address: "14 Oak Avenue, London",
-    area: "Chelsea",
-    notes: "Ring twice",
-  }, linkClient);
-
-  const profileUpsert = calls.find((call) => call.upsert === "client_profiles").payload;
-  const rpcCall = calls.find((call) => call.rpc === "link_recent_guest_booking_to_client");
-
-  assert.equal(result.emailMismatch, true);
-  assert.equal(result.linkedBookingIds[0], bookingId);
-  assert.equal(profileUpsert.full_name, "Maya Shah");
-  assert.equal(profileUpsert.email, "google@example.com");
-  assert.equal(profileUpsert.phone, "07123 456789");
-  assert.deepEqual(rpcCall.payload.link_payload.bookings, [{
-    id: bookingId,
-    booking_reference: "VDM-20260703-ABC",
-  }]);
-  assert.equal(rpcCall.payload.link_payload.saved_address_id, addressId);
-  assert.equal(JSON.stringify(rpcCall.payload).includes("guest@example.com"), false);
-}
 
 const futureBookingRow = {
   id: "44444444-4444-4444-8444-444444444444",

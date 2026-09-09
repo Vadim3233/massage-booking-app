@@ -1,10 +1,16 @@
 const CLIENT_AUTH_REDIRECT_PARAMS = {
   view: "client",
-  clientStep: "my-bookings",
+  clientAuth: "callback",
 };
 
 function viteEnv() {
   return typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
+}
+
+export function buildClientRecoveryRedirectUrl(options = {}) {
+  const url = new URL(buildClientAuthRedirectUrl(options));
+  url.searchParams.set("clientAuth", "recovery");
+  return url.toString();
 }
 
 function browserLocation() {

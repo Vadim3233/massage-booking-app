@@ -158,47 +158,30 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
   assert.match(appSource, /if \(days\[clientDayIndex\]\?\.dateValue >= todayValue\(\)\) return;/);
 }
 
-// Test 0i: Client account sign-in is not Google-only.
+// Test 0i: Client authentication has one password-based entry shell.
 {
-  const clientAccountSource = readFileSync(new URL("./components/Client/ClientAccountPanel.jsx", import.meta.url), "utf8");
-  const myBookingsSource = readFileSync(new URL("./components/Client/MyBookingsPanel.jsx", import.meta.url), "utf8");
+  const portalSource = readFileSync(new URL("./components/Client/ClientPortal.jsx", import.meta.url), "utf8");
   const supabaseClientSource = readFileSync(new URL("./supabaseClient.js", import.meta.url), "utf8");
-
-  assert.match(supabaseClientSource, /export async function signInClientWithEmail\(email, redirectTo, \{ shouldCreateUser = false \} = \{\}\)/);
-  assert.match(supabaseClientSource, /emailRedirectTo: redirectTo, shouldCreateUser/);
-  assert.match(supabaseClientSource, /supabase\.auth\.signInWithOtp/);
-  assert.match(clientAccountSource, /export function ClientEmailSignInForm/);
-  assert.match(clientAccountSource, /Email me a sign-in link/);
-  assert.match(clientAccountSource, /Continue with Google/);
-  assert.match(clientAccountSource, /New bookings require approved client access/);
-  assert.match(myBookingsSource, /<ClientEmailSignInForm onEmailLogin=\{onEmailLogin\} signingIn=\{signingIn\} \/>/);
-  assert.match(appSource, /async function handleClientEmailLogin\(email\)/);
-  assert.match(appSource, /friendlyClientAuthError\(error, "Google sign-in is not enabled yet/);
-  assert.match(appSource, /Check your email for a secure sign-in link\./);
-  assert.match(appSource, /onEmailLogin=\{handleClientEmailLogin\}/);
+  assert.match(supabaseClientSource, /signInClientWithEmailPassword/);
+  assert.match(supabaseClientSource, /registerClientWithEmailPassword/);
+  assert.match(supabaseClientSource, /requestClientPasswordRecovery/);
+  assert.match(supabaseClientSource, /updateClientPassword/);
+  assert.match(portalSource, /Continue with Google/);
+  assert.match(portalSource, /Sign in with email/);
+  assert.match(portalSource, /Create account/);
+  assert.match(portalSource, /Forgot password/);
+  assert.doesNotMatch(appSource, /ClientOnboarding|ClientEmailSignInForm/);
 }
 
-// Test 0j: Client auth links return to the configured production app and My Bookings.
+// Test 0j: Client auth and recovery callbacks are explicit and separate from Admin recovery.
 {
-  const productionRedirect = buildClientAuthRedirectUrl({
-    env: { MODE: "production", VITE_PUBLIC_APP_URL: "https://vadmassage.com/" },
-    location: { origin: "http://127.0.0.1:5173", pathname: "/" },
-  });
-  const localRedirect = buildClientAuthRedirectUrl({
-    env: { MODE: "development" },
-    location: { origin: "http://127.0.0.1:5173", pathname: "/" },
-  });
-
+  const productionRedirect = buildClientAuthRedirectUrl({ env: { MODE: "production", VITE_PUBLIC_APP_URL: "https://vadmassage.com/" }, location: { origin: "http://127.0.0.1:5173", pathname: "/" } });
   assert.equal(normalizePublicAppUrl("https://vadmassage.com/"), "https://vadmassage.com");
-  assert.equal(productionRedirect, "https://vadmassage.com/?view=client&clientStep=my-bookings");
-  assert.ok(!productionRedirect.includes("127.0.0.1"));
-  assert.ok(!productionRedirect.includes("localhost"));
-  assert.equal(localRedirect, "http://127.0.0.1:5173/?view=client&clientStep=my-bookings");
-  assert.match(appSource, /import \{ buildClientAuthRedirectUrl \} from "\.\/lib\/authRedirect\.js";/);
-  assert.match(appSource, /const redirectTo = buildClientAuthRedirectUrl\(\);[\s\S]*await signInClientWithEmail\(normalizedEmail, redirectTo\);/);
-  assert.match(appSource, /const redirectTo = buildClientAuthRedirectUrl\(\);[\s\S]*await signInClientWithGoogle\(redirectTo\);/);
+  assert.equal(productionRedirect, "https://vadmassage.com/?view=client&clientAuth=callback");
+  assert.match(appSource, /isClientPasswordRecoveryRedirect/);
+  assert.match(appSource, /setClientPasswordRecovery\(true\)/);
+  assert.match(appSource, /setPasswordRecovery\(true\)/);
 }
-
 function withBankEnv(values, callback) {
   const previous = Object.fromEntries(BANK_ENV_KEYS.map((key) => [key, process.env[key]]));
   for (const key of BANK_ENV_KEYS) {

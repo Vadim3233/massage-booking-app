@@ -58,12 +58,10 @@ import {
   ensureCurrentClientBookingAddress,
   getCurrentClientProfile,
   groupClientPortalBookings,
-  linkRecentGuestBookingToCurrentClient,
   listCurrentClientPortalBookings,
   loadCurrentClientBookingContext,
   normalizeClientPortalBooking,
   profileInputFromAuthUser,
-  shouldShowPostBookingGoogleSaveCta,
   updateCurrentClientBookingDefaults,
   upsertCurrentClientProfile,
 } from "./lib/clientData.js";
@@ -159,8 +157,8 @@ import {
   createBookingStepHistory,
   hasMeaningfulBookingProgress,
 } from "./lib/bookingStepHistory.js";
-import { ClientEmailSignInForm } from "./components/Client/ClientAccountPanel.jsx";
-import { ClientOnboarding } from "./components/Client/ClientOnboarding.jsx";
+import { ClientPortal } from "./components/Client/ClientPortal.jsx";
+import { ClientAccountPanel } from "./components/Client/ClientAccountPanel.jsx";
 import { useServiceAreaSettings } from "./hooks/useServiceAreaSettings.js";
 import { useClientBookingAccess } from "./hooks/useClientBookingAccess.js";
 import { clientAccessErrorMessage, requireClientBookingAccess } from "./lib/clientAccess.js";
@@ -222,15 +220,12 @@ import {
   yearShortLabel,
 } from "./lib/dateTime.js";
 import {
-  clearRecentGuestBookingContext,
   cloneValue,
-  readRecentGuestBookingContext,
   readStoredJson,
   removeStoredValue,
   sanitizeClientNotes,
   sanitizeClientProfiles,
   sanitizeDocumentSettings,
-  storeRecentGuestBookingContext,
   writeStoredJson,
 } from "./lib/localStorage.js";
 import {
@@ -239,7 +234,8 @@ import {
   postTransactionalEmail,
   telegramTestErrorMessage,
 } from "./lib/notifications.js";
-import { buildClientAuthRedirectUrl } from "./lib/authRedirect.js";
+import { buildClientAuthRedirectUrl, buildClientRecoveryRedirectUrl } from "./lib/authRedirect.js";
+import { clearObsoleteClientSessionStorage } from "./lib/obsoleteClientStorage.js";
 import {
   getClientEnhancements,
   sanitizeStoredEnhancements,
@@ -428,10 +424,11 @@ function authRedirectParamsFromWindow() {
 
 function isPasswordRecoveryRedirect() {
   const params = authRedirectParamsFromWindow();
-  if (params.get("type") === "recovery") return true;
-  if (params.has("recovery_token")) return true;
+  return params.get("view") === "admin" && (params.get("type") === "recovery" || params.has("recovery_token") || params.has("code"));
+}
 
-  return params.get("view") === "admin" && params.has("code");
+function isClientPasswordRecoveryRedirect() {
+  return authRedirectParamsFromWindow().get("clientAuth") === "recovery";
 }
 
 const BOOKING_CONFIRM_TIMEOUT_MS = 15000;
@@ -1374,18 +1371,18 @@ function ClientBookingInterface({
   clientAuthActionLoading,
   clientAuthError,
   clientAuthNotice,
-  onEmailLogin,
-  onGoogleLogin,
-  onClientSignOut,
   isMobilePreviewFrame = false,
   onSwitchAdmin,
   onClientStepChange,
+  initialClientStepOverride = "",
+  clientAccessKind = "ACTIVE",
+  onPortalHome,
 }) {
   const showLocalPreviewControls = import.meta.env.DEV;
   const bookingAccess = useClientBookingAccess(clientSession?.user?.id || null, clientAuthLoading);
   const initialClientStep = (() => {
     if (typeof window === "undefined") return "location";
-    const requestedStep = new URLSearchParams(window.location.search).get("clientStep");
+    const requestedStep = initialClientStepOverride || new URLSearchParams(window.location.search).get("clientStep");
     const allowedSteps = new Set(["location", "treatment", "duration", "time", "review", "details", "payment", "my-bookings"]);
     if (!allowedSteps.has(requestedStep)) return "location";
     return requestedStep === "location" || requestedStep === "my-bookings" || isMobilePreviewFrame
@@ -1510,11 +1507,12 @@ function ClientBookingInterface({
   }, [clientSession, clientStep, confirmedAppointments]);
 
   const returnFromMyBookings = useCallback(() => {
+    if (onPortalHome) { onPortalHome(); return; }
     const returnStep = myBookingsReturnStep && myBookingsReturnStep !== "my-bookings"
       ? myBookingsReturnStep
       : "location";
     setClientStep(returnStep);
-  }, [myBookingsReturnStep]);
+  }, [myBookingsReturnStep, onPortalHome]);
   useEffect(() => {
     if (clientStep === "payment" && !bookingReference) {
       setBookingReference(generateBookingReference());
@@ -1879,10 +1877,6 @@ function ClientBookingInterface({
   }, 0);
   const confirmedPaymentReference = bookingReference || confirmedAppointments[0]?.bookingReference || "Pending";
   const confirmationTelegramUrl = clientTelegramConnected ? "" : buildTelegramStartUrl(CLIENT_TELEGRAM_BOT_URL, confirmedPaymentReference);
-  const showConfirmationGoogleSaveCta = shouldShowPostBookingGoogleSaveCta({
-    clientSession,
-    confirmedAppointments,
-  });
   const confirmationDetailsSaved = Boolean(clientSession?.user && confirmedAppointments.length > 0);
   const confirmationCanCancel = confirmedAppointments.some((appointment) => !isCancelledBooking(appointment));
   const selectedDayActiveBookings = activeBookingsForDay(selectedDay.bookings);
@@ -3064,18 +3058,6 @@ function ClientBookingInterface({
       const confirmedList = Array.isArray(confirmed.appointments) && confirmed.appointments.length > 0
         ? confirmed.appointments
         : appointmentsForConfirmation;
-      if (clientSession?.user) {
-        clearRecentGuestBookingContext();
-      } else {
-        storeRecentGuestBookingContext({
-          appointments: confirmedList,
-          bookingReference,
-          customer: customerPayload,
-          address: emailPayload.address,
-          area: emailPayload.location,
-          notes: emailPayload.sessionNotes || emailPayload.notes,
-        });
-      }
       releaseCheckoutHolds(appointmentsForConfirmation);
       setActiveBookingHold(null);
       setConfirmedAppointments(confirmedList);
@@ -3208,24 +3190,6 @@ function ClientBookingInterface({
     return "Your appointment is confirmed";
   }
 
-  if (!isMobilePreviewFrame && clientStep !== "my-bookings" && confirmedAppointments.length === 0 && !bookingAccess.allowed) {
-    return <ClientOnboarding
-      loading={bookingAccess.loading}
-      message={bookingAccess.error}
-      onRetry={bookingAccess.refresh}
-      onSwitchAdmin={onSwitchAdmin}
-      onEmailLogin={onEmailLogin}
-      onGoogleLogin={onGoogleLogin}
-      onMyBookings={openMyBookings}
-      onSignOut={onClientSignOut}
-      signingIn={clientAuthActionLoading}
-      error={clientAuthError}
-      notice={clientAuthNotice}
-      profile={clientProfile}
-      session={clientSession}
-    />;
-  }
-
   const premiumBookingDetailsPanel = bookingDetailsOpen ? (
     <section className="premium-booking-details-panel" id="premium-booking-details">
       <div>
@@ -3348,26 +3312,15 @@ function ClientBookingInterface({
           loading={myBookingsLoading || (clientAuthLoading && Boolean(clientSession?.user))}
           onBackToBooking={returnFromMyBookings}
           onBookAgain={applyMyBookingsBookAgain}
-          onBookMassage={() => setClientStep("location")}
-          onEmailLogin={onEmailLogin}
-          onGoogleLogin={onGoogleLogin}
+          onBookMassage={() => clientAccessKind === "ACTIVE" ? setClientStep("location") : onPortalHome?.()}
+          allowNewBooking={clientAccessKind === "ACTIVE"}
           onRefreshBookings={refreshMyBookings}
-          notice={clientAuthNotice}
           session={clientSession}
-          signingIn={clientAuthActionLoading}
         />
       )}
 
       {clientStep === "location" && (
         <ClientLocationStep
-          account={{
-            error: clientAuthError,
-            loading: clientAuthLoading,
-            notice: clientAuthNotice,
-            profile: clientProfile,
-            session: clientSession,
-            signingIn: clientAuthActionLoading,
-          }}
           areaPickerRef={areaPickerRef}
           areaSelectionMessage={areaSelectionMessage || serviceAreasMessage}
           bookAgain={{
@@ -3384,11 +3337,7 @@ function ClientBookingInterface({
             setReturnToReviewAfterArea(false);
             setClientStep("review");
           }}
-          onEmailLogin={onEmailLogin}
-          onGoogleLogin={onGoogleLogin}
-          onMyBookings={openMyBookings}
           onSelectArea={selectAreaAndContinue}
-          onSignOut={onClientSignOut}
           onToggleMoreAreas={() => setShowMoreAreas((isOpen) => !isOpen)}
           returnToReviewAfterArea={returnToReviewAfterArea}
           serviceAreas={clientLocationAreas}
@@ -4189,8 +4138,7 @@ function ClientBookingInterface({
                   <span className="confirmation-card-icon" aria-hidden="true">
                     <UserRound size={32} strokeWidth={1.7} />
                   </span>
-                  {confirmationDetailsSaved ? (
-                    <>
+                  {confirmationDetailsSaved && <>
                       <div>
                         <h2>Book faster next time</h2>
                         <p>View your appointments anytime in My Bookings.</p>
@@ -4199,26 +4147,7 @@ function ClientBookingInterface({
                       <button type="button" onClick={openMyBookings}>
                         Go to My Bookings
                       </button>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <h2>Book faster next time</h2>
-                        <p>Sign in to view your appointments anytime in My Bookings.</p>
-                        <small><LockKeyhole aria-hidden="true" size={16} strokeWidth={1.8} /> Secure and private. I never share your data.</small>
-                      </div>
-                      {showConfirmationGoogleSaveCta && (
-                        <ClientEmailSignInForm onEmailLogin={onEmailLogin} signingIn={clientAuthActionLoading} />
-                      )}
-                      {showConfirmationGoogleSaveCta && (
-                        <button type="button" onClick={onGoogleLogin} disabled={clientAuthLoading || clientAuthActionLoading}>
-                          {clientAuthActionLoading ? "Connecting..." : "Continue with Google"}
-                        </button>
-                      )}
-                      {showConfirmationGoogleSaveCta && clientAuthNotice && <p className="client-account-notice" role="status">{clientAuthNotice}</p>}
-                      {showConfirmationGoogleSaveCta && clientAuthError && <p className="client-account-error" role="alert">{clientAuthError}</p>}
-                    </>
-                  )}
+                    </>}
                 </section>
 
                 <section className="confirmation-card confirmation-next-card">
@@ -5173,6 +5102,7 @@ function bookingEmailPayload(booking) {
 function App() {
   const initialSearchParams = authRedirectParamsFromWindow();
   const initialPasswordRecovery = isPasswordRecoveryRedirect();
+  const initialClientPasswordRecovery = isClientPasswordRecoveryRedirect();
   const isMobilePreviewFrame = initialSearchParams.get("mobilePreviewFrame") === "1";
   const showLocalPreviewControls = import.meta.env.DEV;
   const initialView = initialSearchParams.get("view") === "admin" || initialPasswordRecovery ? "admin" : "client";
@@ -5240,6 +5170,7 @@ function App() {
   const [enhancementSaveStatus, setEnhancementSaveStatus] = useState({ message: "", saving: false, type: "" });
   const [adminBookingsLoaded, setAdminBookingsLoaded] = useState(false);
   const [passwordRecovery, setPasswordRecovery] = useState(initialPasswordRecovery);
+  const [clientPasswordRecovery, setClientPasswordRecovery] = useState(initialClientPasswordRecovery);
   const [clientDayIndex, setClientDayIndex] = useState(0);
   const [clientServiceId, setClientServiceId] = useState("");
   const [clientDuration, setClientDuration] = useState(60);
@@ -5377,6 +5308,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let subscription;
+    clearObsoleteClientSessionStorage();
 
     async function applySession(session) {
       if (cancelled) return;
@@ -5439,8 +5371,13 @@ function App() {
           applySession(session);
           setAdminAuthError("");
           if (event === "PASSWORD_RECOVERY") {
-            setPasswordRecovery(true);
-            setActiveView("admin");
+            if (isClientPasswordRecoveryRedirect()) {
+              setClientPasswordRecovery(true);
+              setActiveView("client");
+            } else {
+              setPasswordRecovery(true);
+              setActiveView("admin");
+            }
           }
         });
         subscription = authListener.data.subscription;
@@ -5994,7 +5931,7 @@ function App() {
     }
   }
 
-  async function handleClientEmailLogin(email) {
+  async function handleClientEmailLogin(email, password) {
     setClientAuthError("");
     setClientAuthNotice("");
     const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -6005,16 +5942,46 @@ function App() {
 
     setClientAuthActionLoading(true);
     try {
-      const { signInClientWithEmail } = await import("./supabaseClient.js");
-      const redirectTo = buildClientAuthRedirectUrl();
-      await signInClientWithEmail(normalizedEmail, redirectTo);
-      setClientAuthNotice("Check your email for a secure sign-in link.");
+      const { signInClientWithEmailPassword } = await import("./supabaseClient.js");
+      await signInClientWithEmailPassword(normalizedEmail, password);
     } catch (error) {
-      const message = friendlyClientAuthError(error, "I couldn't send the sign-in email just now. Please try again.");
+      const message = friendlyClientAuthError(error, "I couldn't sign you in. Please check your email and password.");
       setClientAuthError(message);
     } finally {
       setClientAuthActionLoading(false);
     }
+  }
+
+  async function handleClientEmailRegistration(email, password) {
+    setClientAuthError(""); setClientAuthNotice(""); setClientAuthActionLoading(true);
+    try {
+      const { registerClientWithEmailPassword } = await import("./supabaseClient.js");
+      const result = await registerClientWithEmailPassword(String(email).trim().toLowerCase(), password, buildClientAuthRedirectUrl());
+      if (!result.session) setClientAuthNotice("Check your email to confirm your account, then sign in.");
+    } catch (error) { setClientAuthError(friendlyClientAuthError(error, "I couldn't create your account just now.")); }
+    finally { setClientAuthActionLoading(false); }
+  }
+
+  async function handleClientPasswordRecovery(email) {
+    setClientAuthError(""); setClientAuthNotice(""); setClientAuthActionLoading(true);
+    try {
+      const { requestClientPasswordRecovery } = await import("./supabaseClient.js");
+      await requestClientPasswordRecovery(String(email).trim().toLowerCase(), buildClientRecoveryRedirectUrl());
+      setClientAuthNotice("Check your email for a password reset link.");
+    } catch (error) { setClientAuthError(friendlyClientAuthError(error, "I couldn't send the reset email just now.")); }
+    finally { setClientAuthActionLoading(false); }
+  }
+
+  async function handleClientPasswordUpdate(password) {
+    setClientAuthError(""); setClientAuthActionLoading(true);
+    try {
+      const { updateClientPassword } = await import("./supabaseClient.js");
+      await updateClientPassword(password);
+      setClientPasswordRecovery(false);
+      window.history.replaceState(window.history.state, "", "/?view=client");
+      setClientAuthNotice("Your password has been updated.");
+    } catch (error) { setClientAuthError(friendlyClientAuthError(error, "I couldn't update your password.")); }
+    finally { setClientAuthActionLoading(false); }
   }
 
   async function handleClientSignOut() {
@@ -7394,7 +7361,27 @@ function App() {
       )}
 
       {activeView === "client" ? (
-        <ClientBookingInterface
+        <ClientPortal
+          authLoading={authLoading}
+          authBusy={clientAuthActionLoading}
+          error={clientAuthError}
+          notice={clientAuthNotice}
+          isAdmin={Boolean(adminSession)}
+          onForgot={handleClientPasswordRecovery}
+          onGoogle={handleClientGoogleLogin}
+          onPasswordUpdate={handleClientPasswordUpdate}
+          onSignIn={handleClientEmailLogin}
+          onSignOut={handleClientSignOut}
+          onSignUp={handleClientEmailRegistration}
+          onSwitchAdmin={() => setActiveView("admin")}
+          recovery={clientPasswordRecovery}
+          session={authSession}
+          renderDestination={(destination, onHome, accessKind) => destination === "account" ? (<>
+            <button type="button" className="secondary-button" onClick={onHome}>Back to home</button>
+            <ClientAccountPanel profile={clientProfile} session={authSession} onSignOut={handleClientSignOut} />
+          </>
+          ) : <ClientBookingInterface
+          key={destination}
           coverageZones={coverageZones}
           days={days}
           serviceAreas={areaSettings.ready ? serviceAreas : []}
@@ -7433,12 +7420,13 @@ function App() {
           clientAuthActionLoading={clientAuthActionLoading}
           clientAuthError={clientAuthError}
           clientAuthNotice={clientAuthNotice}
-          onEmailLogin={handleClientEmailLogin}
-          onGoogleLogin={handleClientGoogleLogin}
-          onClientSignOut={handleClientSignOut}
           isMobilePreviewFrame={isMobilePreviewFrame}
           onSwitchAdmin={() => setActiveView("admin")}
           onClientStepChange={setMobilePreviewClientStep}
+          initialClientStepOverride={destination === "my-bookings" ? "my-bookings" : "location"}
+          clientAccessKind={accessKind}
+          onPortalHome={onHome}
+        />}
         />
       ) : (
         <>

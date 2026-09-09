@@ -1,13 +1,9 @@
 {
   "rewrites": [
-    { "source": "/invite/:token", "destination": "/index.html" },
-    { "source": "/onboarding", "destination": "/index.html" },
     { "source": "/privacy", "destination": "/index.html" },
     { "source": "/terms", "destination": "/index.html" }
   ],
   "headers": [
-    { "source": "/(.*)", "headers": [{ "key": "Referrer-Policy", "value": "no-referrer" }] },
-    { "source": "/invite/:token", "headers": [{ "key": "Cache-Control", "value": "no-store" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow" }] },
-    { "source": "/onboarding", "headers": [{ "key": "Cache-Control", "value": "no-store" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow" }] }
+    { "source": "/(.*)", "headers": [{ "key": "Referrer-Policy", "value": "no-referrer" }] }
   ]
 }

@@ -29,8 +29,7 @@ async function user(active = false) {
   const actor = { id: randomUUID(), email: `${randomUUID()}@example.test` };
   await db.query('insert into auth.users values ($1,$2,now())', [actor.id, actor.email]);
   if (active) {
-    const invitation = await rpc(admin, 'admin_create_client_invitation', [null, null, null]);
-    await rpc(actor, 'accept_client_invitation', [invitation.token, validProfile]);
+    await rpc(actor, 'activate_my_client_account', [validProfile], ['jsonb']);
   }
   return actor;
 }

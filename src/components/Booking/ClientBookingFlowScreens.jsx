@@ -21,19 +21,13 @@ import {
   UserRound,
 } from "lucide-react";
 import { BookAgainPanel } from "../Client/BookAgainPanel.jsx";
-import { ClientAccountPanel } from "../Client/ClientAccountPanel.jsx";
 
 export function ClientLocationStep({
-  account,
   areaPickerRef,
   areaSelectionMessage,
   bookAgain,
   onBackToReview,
-  onEmailLogin,
-  onGoogleLogin,
-  onMyBookings,
   onSelectArea,
-  onSignOut,
   onToggleMoreAreas,
   returnToReviewAfterArea,
   serviceAreas,
@@ -120,20 +114,6 @@ export function ClientLocationStep({
           <ShieldCheck aria-hidden="true" size={22} strokeWidth={1.8} />
           Your information is secure and private
         </p>
-        <div className="account-actions">
-          <ClientAccountPanel
-            error={account.error}
-            loading={account.loading}
-            notice={account.notice}
-            onEmailLogin={onEmailLogin}
-            onGoogleLogin={onGoogleLogin}
-            onMyBookings={onMyBookings}
-            onSignOut={onSignOut}
-            signingIn={account.signingIn}
-            profile={account.profile}
-            session={account.session}
-          />
-        </div>
       </div>
     </section>
   );

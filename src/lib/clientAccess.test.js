@@ -55,33 +55,23 @@ for (const status of [null,'BLOCKED','ACTIVE']) test(`actual waitlist handler wi
   if (status!=='ACTIVE') assert.ok(message);
 });
 
-test('all client entry points are gated and persistence has no anonymous or direct-insert fallback', () => {
-  const adminWorkspace = readFileSync(new URL('../components/Admin/LiveAdminWorkspace.jsx',import.meta.url),'utf8');
-  for (const source of [app,adminWorkspace]) {
-    assert.match(source,/async function createBookingHoldInSupabase\([^]*?const supabase = await getSupabaseClient\(\)/);
-    assert.match(source,/async function releaseBookingHoldInSupabase\([^]*?const supabase = await getSupabaseClient\(\)/);
-  }
-  for (const name of ['continueToCheckoutDetails','selectTimeSlot','confirmPayment']) {
-    const start = app.indexOf(`async function ${name}(`);
-    assert.ok(start>=0,name);
-    assert.match(app.slice(start,start+1800),/bookingAccess\.refresh\(\)/,name);
-  }
-  assert.match(app,/clientStep !== "my-bookings"[\s\S]{0,140}!bookingAccess.allowed/);
-  const persistence = readFileSync(new URL('./bookingSupabase.js',import.meta.url),'utf8');
-  const saving = persistence.slice(persistence.indexOf('export async function saveBookingToSupabase('),persistence.indexOf('export async function',persistence.indexOf('export async function saveBookingToSupabase(')+30));
-  assert.match(saving,/await getSupabaseClient\(\)/);
-  assert.doesNotMatch(saving,/getPublicSupabaseClient|\.insert\(/);
-  assert.match(app.slice(app.indexOf('async function addBookingToDay('),app.indexOf('async function createAdminAppointment(')),/await saveBookingToSupabase\(/);
+test('one client shell gates booking and preserves blocked owned-data access', () => {
+  const portal = readFileSync(new URL('../components/Client/ClientPortal.jsx',import.meta.url),'utf8');
+  assert.match(portal,/SIGN(?:ED_OUT|ED_OUT)/);
+  assert.match(portal,/PROFILE_REQUIRED/);
+  assert.match(portal,/data\?\.status === "BLOCKED"/);
+  assert.match(portal,/access\.kind === "ACTIVE" && <button[^]*Book appointment/);
+  assert.match(portal,/My Bookings/);
+  assert.match(portal,/Online booking is currently unavailable for this account\. Please contact me\./);
+  assert.doesNotMatch(app,/ClientOnboarding|ClientBookingAccessNotice/);
 });
 
-test('access notice renders sign-in, retry and My Bookings without production admin control', async () => {
-  const account = readFileSync(new URL('../components/Client/ClientAccountPanel.jsx',import.meta.url),'utf8');
-  const notice = readFileSync(new URL('../components/Client/ClientBookingAccessNotice.jsx',import.meta.url),'utf8');
-  const source = [account,notice].map(value=>value.replace(/^import .*;\r?\n/gm,'').replaceAll('export function','function').replaceAll('import.meta.env.DEV','false')).join('\n');
-  const {code} = await transformWithOxc(source,'access-notice.jsx',{jsx:{runtime:'classic'}});
-  const Notice = new Function('React','useState',`${code}; return ClientBookingAccessNotice;`)(React,React.useState);
-  const signedOut = renderToStaticMarkup(React.createElement(Notice,{message:CLIENT_ACCESS_MESSAGES.CLIENT_AUTH_REQUIRED}));
-  assert.match(signedOut,/Continue with Google/); assert.match(signedOut,/My Bookings/); assert.doesNotMatch(signedOut,/>Admin</);
-  const blocked = renderToStaticMarkup(React.createElement(Notice,{message:CLIENT_ACCESS_MESSAGES.CLIENT_ACCESS_BLOCKED,session:{user:{email:'client@example.test'}}}));
-  assert.match(blocked,/role="alert"/); assert.match(blocked,/Check access again/); assert.match(blocked,/My Bookings/); assert.match(blocked,/Sign out/);
+test('booking creation remains protected at each side-effect entry point', () => {
+  for (const name of ['continueToCheckoutDetails','selectTimeSlot','confirmPayment']) {
+    const start=app.indexOf(`async function ${name}(`); assert.ok(start>=0,name);
+    assert.match(app.slice(start,start+1800),/bookingAccess\.refresh\(\)/,name);
+  }
+  const persistence=readFileSync(new URL('./bookingSupabase.js',import.meta.url),'utf8');
+  const saving=persistence.slice(persistence.indexOf('export async function saveBookingToSupabase('),persistence.indexOf('export async function',persistence.indexOf('export async function saveBookingToSupabase(')+30));
+  assert.match(saving,/await getSupabaseClient\(\)/); assert.doesNotMatch(saving,/getPublicSupabaseClient|\.insert\(/);
 });

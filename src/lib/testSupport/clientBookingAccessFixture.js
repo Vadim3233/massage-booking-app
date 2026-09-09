@@ -3,6 +3,7 @@ import { fixtureSql, migrationSql as stage1Sql } from "./clientAccessFixture.js"
 
 const readMigration = (name) => readFile(new URL(`../../../supabase/migrations/${name}`, import.meta.url), "utf8");
 export const stage2Sql = await readMigration("20260907130000_enforce_client_booking_access.sql");
+const selfRegistrationSql = await readMigration("20260908140000_enable_client_self_registration.sql");
 const reconciled = await readMigration("20260718120000_reconcile_live_production_schema.sql");
 const repaired = await readMigration("20260804120000_production_safety_repair.sql");
 const recentCancel = await readMigration("20260720130000_cancel_recent_booking_request.sql");
@@ -67,4 +68,5 @@ export const bookingFixtureSql = `${fixtureSql()}
   grant insert (client_name) on public.bookings to anon, authenticated;
   grant insert on public.orders, public.booking_holds to anon, authenticated;
   ${stage1Sql}
+  ${selfRegistrationSql}
 `;

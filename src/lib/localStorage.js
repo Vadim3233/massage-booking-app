@@ -1,9 +1,5 @@
 import { DEFAULT_DOCUMENT_SETTINGS } from "../config/documentSettings.js";
-import {
-  RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY,
-  RECENT_GUEST_BOOKING_CONTEXT_TTL_MS,
-  STORAGE_VERSION,
-} from "../config/storageKeys.js";
+import { STORAGE_VERSION } from "../config/storageKeys.js";
 
 export function cloneValue(value) {
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -132,52 +128,4 @@ export function removeSessionValue(key) {
   } catch {
     // Session persistence is best-effort after OAuth redirects.
   }
-}
-
-export function readRecentGuestBookingContext() {
-  const context = readSessionJson(RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY, null);
-  const createdAt = Date.parse(context?.createdAt || "");
-  if (!context || !Number.isFinite(createdAt) || Date.now() - createdAt > RECENT_GUEST_BOOKING_CONTEXT_TTL_MS) {
-    removeSessionValue(RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY);
-    return null;
-  }
-  return context;
-}
-
-export function clearRecentGuestBookingContext() {
-  removeSessionValue(RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY);
-}
-
-export function storeRecentGuestBookingContext({
-  address = "",
-  appointments = [],
-  area = "",
-  bookingReference = "",
-  customer = {},
-  notes = "",
-}) {
-  const bookings = (Array.isArray(appointments) ? appointments : [])
-    .map((appointment) => ({
-      id: String(appointment?.id || "").trim(),
-      bookingReference: String(appointment?.bookingReference || bookingReference || "").trim(),
-    }))
-    .filter((booking) => booking.id && booking.bookingReference);
-
-  if (bookings.length === 0) {
-    clearRecentGuestBookingContext();
-    return;
-  }
-
-  writeSessionJson(RECENT_GUEST_BOOKING_CONTEXT_STORAGE_KEY, {
-    createdAt: new Date().toISOString(),
-    bookings,
-    customer: {
-      email: String(customer.email || "").trim(),
-      name: String(customer.name || "").trim(),
-      phone: String(customer.phone || "").trim(),
-    },
-    address: String(address || "").trim(),
-    area: String(area || "").trim(),
-    notes: String(notes || "").trim(),
-  });
 }

@@ -39,15 +39,15 @@ function harness() {
 {
   const test = harness();
   const clients = { ...calendar, tab: "customers" };
-  const invitations = { ...clients, clientDirectoryView: "invitations" };
+  const access = { ...clients, clientDirectoryView: "access" };
   const pending = { ...calendar, tab: "pending" };
   test.controller.sync(clients);
-  test.controller.sync(invitations);
+  test.controller.sync(access);
   test.controller.sync(pending);
   test.history.back(); test.history.back(); test.history.back();
-  assert.deepEqual(test.restored, [invitations, clients, calendar]);
+  assert.deepEqual(test.restored, [access, clients, calendar]);
   test.history.forward(); test.history.forward();
-  assert.deepEqual(test.restored.slice(-2), [clients, invitations]);
+  assert.deepEqual(test.restored.slice(-2), [clients, access]);
 }
 
 {

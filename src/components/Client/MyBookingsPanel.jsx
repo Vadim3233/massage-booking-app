@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CalendarDays, Check, ChevronLeft, Clock3, Copy, MapPin, ReceiptText, Repeat2, X } from "lucide-react";
 import { DEFAULT_DAY_SETTINGS, DEFAULT_TRAVEL_BUFFER, getSchedulingPreview, minutesToTime, timeToMinutes } from "../../schedulingEngine.js";
-import { ClientEmailSignInForm } from "./ClientAccountPanel.jsx";
 import {
   buildClientBookingDetailsViewModel,
   canClientCancelBooking,
@@ -592,6 +591,7 @@ function BookingDetailsView({
 }
 
 export function MyBookingsPanel({
+  allowNewBooking = true,
   calendarDays = [],
   error = "",
   groupedBookings,
@@ -599,12 +599,8 @@ export function MyBookingsPanel({
   onBackToBooking,
   onBookAgain,
   onBookMassage,
-  onEmailLogin,
-  onGoogleLogin,
   onRefreshBookings,
-  notice = "",
   session,
-  signingIn = false,
 }) {
   const [copiedKey, setCopiedKey] = useState("");
   const [selectedBookingId, setSelectedBookingId] = useState("");
@@ -633,19 +629,13 @@ export function MyBookingsPanel({
             <ChevronLeft aria-hidden="true" size={18} />
             Back to booking
           </button>
-          <button type="button" className="my-bookings-new-button" onClick={onBookMassage}>
+          {allowNewBooking && <button type="button" className="my-bookings-new-button" onClick={onBookMassage}>
             <CalendarDays aria-hidden="true" size={18} />
             New booking
-          </button>
+          </button>}
         </div>
         <div className="my-bookings-empty-state">
           <p>You don't have any saved bookings yet.</p>
-          <ClientEmailSignInForm onEmailLogin={onEmailLogin} signingIn={signingIn} />
-          <button type="button" className="google-login-button" onClick={onGoogleLogin} disabled={signingIn}>
-            <span className="google-mark" aria-hidden="true">G</span>
-            Continue with Google
-          </button>
-          {notice && <small role="status">{notice}</small>}
           {error && <small role="alert">{error}</small>}
         </div>
       </section>
@@ -671,10 +661,10 @@ export function MyBookingsPanel({
           <ChevronLeft aria-hidden="true" size={18} />
           Back to booking
         </button>
-        <button type="button" className="my-bookings-new-button" onClick={onBookMassage}>
+        {allowNewBooking && <button type="button" className="my-bookings-new-button" onClick={onBookMassage}>
           <CalendarDays aria-hidden="true" size={18} />
           New booking
-        </button>
+        </button>}
       </div>
 
       {loading ? (
@@ -682,7 +672,7 @@ export function MyBookingsPanel({
       ) : total === 0 ? (
         <div className="my-bookings-empty-state">
           <p>You don't have any saved bookings yet.</p>
-          <button type="button" className="outline-action" onClick={onBookMassage}>Book a massage</button>
+          {allowNewBooking && <button type="button" className="outline-action" onClick={onBookMassage}>Book a massage</button>}
         </div>
       ) : (
         <>

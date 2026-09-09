@@ -105,8 +105,6 @@ const locationOutput = ClientLocationStep({
   areaSelectionMessage: "Outside coverage",
   bookAgain: { show: true, clientName: "Ada", favoriteSelection: null, lastSelection: null, loading: false, onApply: () => {}, recentSelections: [], usualSelection: null },
   onBackToReview: () => calls.push(["backReview"]),
-  onEmailLogin: () => {},
-  onGoogleLogin: () => {},
   onMyBookings: () => {},
   onSelectArea: (id) => calls.push(["area", id]),
   onSignOut: () => {},

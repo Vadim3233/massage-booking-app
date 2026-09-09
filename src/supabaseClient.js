@@ -34,13 +34,31 @@ export async function signInClientWithGoogle(redirectTo) {
   return data;
 }
 
-export async function signInClientWithEmail(email, redirectTo, { shouldCreateUser = false } = {}) {
-  const { data, error } = await supabase.auth.signInWithOtp({
+export async function signInClientWithEmailPassword(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function registerClientWithEmailPassword(email, password, redirectTo) {
+  const { data, error } = await supabase.auth.signUp({
     email,
-    options: { emailRedirectTo: redirectTo, shouldCreateUser },
+    password,
+    options: { emailRedirectTo: redirectTo },
   });
   if (error) throw error;
   return data;
+}
+
+export async function requestClientPasswordRecovery(email, redirectTo) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
+export async function updateClientPassword(password) {
+  const { data, error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+  return data.user;
 }
 
 export async function isCurrentUserBookingAdmin() {
