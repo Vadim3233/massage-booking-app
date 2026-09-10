@@ -238,7 +238,10 @@ import { buildClientAuthRedirectUrl, buildClientRecoveryRedirectUrl } from "./li
 import {
   mapClientRegistrationError,
   mapClientSignInError,
+  classifySignupResult,
   validateClientCredentials,
+  validateClientEmail,
+  validateClientRegistration,
 } from "./lib/clientAuthValidation.js";
 import { clearObsoleteClientSessionStorage } from "./lib/obsoleteClientStorage.js";
 import {
@@ -5953,17 +5956,25 @@ function App() {
     }
   }
 
-  async function handleClientEmailRegistration(email, password) {
+  async function handleClientEmailRegistration(registration) {
     setClientAuthError(""); setClientAuthNotice("");
-    const validation = validateClientCredentials(email, password);
+    const validation = validateClientRegistration(registration);
     if (!validation.valid) { setClientAuthError(validation.error); return; }
     setClientAuthActionLoading(true);
     try {
       const { registerClientWithEmailPassword } = await import("./supabaseClient.js");
-      const result = await registerClientWithEmailPassword(validation.email, validation.password, buildClientAuthRedirectUrl());
-      if (!result.session) setClientAuthNotice("Check your email to confirm your account, then sign in.");
-    } catch (error) { setClientAuthError(mapClientRegistrationError(error)); }
+      const profile = { first_name: validation.firstName, last_name: validation.lastName, mobile: validation.mobile };
+      const result = await registerClientWithEmailPassword(validation.email, validation.password, buildClientAuthRedirectUrl(), profile);
+      return classifySignupResult(result);
+    } catch (error) { throw new Error(mapClientRegistrationError(error)); }
     finally { setClientAuthActionLoading(false); }
+  }
+
+  async function handleClientVerificationResend(email) {
+    const emailValidation = validateClientEmail(email);
+    if (!emailValidation.valid) throw new Error("Invalid email");
+    const { resendClientSignupVerification } = await import("./supabaseClient.js");
+    await resendClientSignupVerification(emailValidation.email, buildClientAuthRedirectUrl());
   }
 
   async function handleClientPasswordRecovery(email) {
@@ -7374,6 +7385,7 @@ function App() {
           onForgot={handleClientPasswordRecovery}
           onGoogle={handleClientGoogleLogin}
           onPasswordUpdate={handleClientPasswordUpdate}
+          onResendVerification={handleClientVerificationResend}
           onSignIn={handleClientEmailLogin}
           onSignOut={handleClientSignOut}
           onSignUp={handleClientEmailRegistration}

@@ -25,9 +25,9 @@ async function rpc(actor, name, params = [], casts = [], role = 'authenticated')
   const result = await asRole(role, actor, `select to_jsonb(public.${name}(${params.map((_, i) => `$${i + 1}${casts[i] ? `::${casts[i]}` : ''}`).join(',')})) as result`, params);
   return result.rows[0].result;
 }
-async function user(active = false) {
+async function user(active = false, confirmed = true) {
   const actor = { id: randomUUID(), email: `${randomUUID()}@example.test` };
-  await db.query('insert into auth.users values ($1,$2,now())', [actor.id, actor.email]);
+  await db.query('insert into auth.users values ($1,$2,$3)', [actor.id, actor.email, confirmed ? new Date().toISOString() : null]);
   if (active) {
     await rpc(actor, 'activate_my_client_account', [validProfile], ['jsonb']);
   }
@@ -118,6 +118,12 @@ test('ACTIVE complete client creates owner-bound hold, order and booking', async
   assert.equal(booking.order_id,createdOrder.id);
   const { rows: [stored] } = await db.query('select * from booking_holds where id=$1',[held.hold_id]);
   assert.equal(stored.user_id,actor.id); assert.ok(stored.released_at);
+});
+
+test('unverified authenticated client cannot activate or book', async () => {
+  const actor = await user(false, false);
+  await assert.rejects(rpc(actor, 'activate_my_client_account', [validProfile], ['jsonb']), /confirmed email/);
+  await assert.rejects(hold(actor, await nextDate()));
 });
 
 test('forged ownership, foreign holds/orders and fake admin fields cannot bypass', async () => {

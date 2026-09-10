@@ -59,8 +59,9 @@ test("BLOCKED account cannot self-unblock", async () => {
   assert.equal((await db.query("select status from client_access_private.client_access where user_id=$1", [actor.id])).rows[0].status, "BLOCKED");
 });
 
-test("unconfirmed and Admin identities cannot self-activate", async () => {
-  await assert.rejects(activate(await user({ confirmed: false })), /confirmed email/);
+test("unconfirmed authenticated client and Admin identity cannot activate", async () => {
+  const unconfirmed = await user({ confirmed: false });
+  await assert.rejects(activate(unconfirmed), /confirmed email/);
   await assert.rejects(activate({ id: adminId, email: adminEmail }), /Admin accounts/);
 });
 

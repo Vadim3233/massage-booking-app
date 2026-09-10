@@ -167,7 +167,7 @@ const telegramLinksSource = readFileSync(new URL("./lib/telegramLinks.js", impor
   assert.match(supabaseClientSource, /requestClientPasswordRecovery/);
   assert.match(supabaseClientSource, /updateClientPassword/);
   assert.match(portalSource, /Continue with Google/);
-  assert.match(portalSource, /Sign in with email/);
+  assert.match(portalSource, /"Sign in"/);
   assert.match(portalSource, /Create account/);
   assert.match(portalSource, /Forgot password/);
   assert.doesNotMatch(appSource, /ClientOnboarding|ClientEmailSignInForm/);
