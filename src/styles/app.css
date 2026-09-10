@@ -24774,3 +24774,250 @@ small,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Stable mobile Admin Calendar navigation and calmer agenda hierarchy. */
+.admin-standard-header,
+.admin-calendar-sticky-header {
+  display: contents;
+}
+
+@media (max-width: 760px) {
+  .admin-calendar-sticky-header {
+    position: sticky;
+    top: 0;
+    z-index: 45;
+    display: block;
+    width: min(430px, 100%);
+    margin-inline: auto;
+    border-bottom: 1px solid rgba(48, 64, 92, 0.1);
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 8px 20px rgba(18, 28, 52, 0.06);
+    backdrop-filter: blur(16px);
+  }
+
+  .admin-calendar-sticky-header .admin-topbar {
+    position: relative;
+    z-index: auto;
+    margin-bottom: 0;
+    padding-bottom: 5px;
+    background: transparent;
+  }
+
+  .admin-calendar-sticky-header .admin-date-strip,
+  .admin-tab-calendar .admin-date-strip {
+    display: grid;
+    gap: 7px;
+    width: 100%;
+    margin: 0;
+    padding: 4px 12px 10px;
+    background: transparent;
+  }
+
+  .admin-tab-calendar .admin-date-strip-month {
+    margin: 0;
+    color: #5c687a;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+  }
+
+  .admin-tab-calendar .admin-week-date-row {
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 5px;
+  }
+
+  .admin-tab-calendar .admin-week-date-pills {
+    gap: 2px;
+  }
+
+  .admin-tab-calendar .admin-week-nav-button {
+    min-height: 46px;
+    border-color: transparent;
+    border-radius: 10px;
+    background: transparent;
+  }
+
+  .admin-tab-calendar .admin-date-pill {
+    min-height: 48px;
+    border-color: transparent;
+    border-radius: 10px;
+    padding: 6px 1px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .admin-tab-calendar .admin-date-weekday-short {
+    color: #7b8494;
+    font-size: 0.66rem;
+    font-weight: 600;
+  }
+
+  .admin-tab-calendar .admin-date-pill strong {
+    color: #4e5b70;
+    font-size: 0.9rem;
+  }
+
+  .admin-tab-calendar .active-admin-date {
+    border-color: rgba(47, 122, 93, 0.22);
+    background: #e8f5ed;
+    box-shadow: none;
+  }
+
+  .admin-tab-calendar .active-admin-date strong,
+  .admin-tab-calendar .active-admin-date .admin-date-weekday-short {
+    color: #205e39;
+  }
+
+  .admin-tab-calendar .today-admin-date:not(.active-admin-date) {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .admin-tab-calendar .admin-today-jump-button {
+    justify-self: center;
+    min-width: 104px;
+    min-height: 42px;
+    margin: 0;
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-size: 0.78rem;
+  }
+
+  .admin-tab-calendar .admin-week-summary-line {
+    margin-top: 0;
+    color: #7a8494;
+    font-size: 0.66rem;
+  }
+
+  .admin-tab-calendar .admin-screen {
+    min-height: calc(100dvh - 220px);
+  }
+
+  .admin-tab-calendar .admin-agenda-list {
+    gap: 18px;
+    padding-top: 12px;
+  }
+
+  .admin-tab-calendar .admin-agenda-day,
+  .admin-tab-calendar .admin-agenda-today,
+  .admin-tab-calendar .selected-admin-agenda-day,
+  .admin-tab-calendar .selected-admin-agenda-day.admin-agenda-today {
+    gap: 10px;
+    border-bottom: 0;
+    padding: 10px 0 18px;
+  }
+
+  .admin-tab-calendar .admin-agenda-day + .admin-agenda-day {
+    padding-top: 18px;
+  }
+
+  .admin-tab-calendar .admin-agenda-day-topline h3 {
+    font-size: 1.24rem;
+  }
+
+  .agenda-day-meta-controls {
+    gap: 4px 10px;
+  }
+
+  .admin-day-summary-line {
+    padding-inline: 0;
+    color: #7a8494;
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+
+  .agenda-booking-card {
+    gap: 7px;
+    border-color: rgba(48, 64, 92, 0.08);
+    border-left-width: 3px;
+    border-radius: 12px;
+    padding: 11px 9px 11px 11px;
+    background: #fff;
+    box-shadow: 0 8px 20px rgba(18, 28, 52, 0.045);
+  }
+
+  .agenda-booking-card-main {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 11px;
+    min-height: 62px;
+  }
+
+  .agenda-booking-time-block {
+    gap: 5px;
+    min-height: 58px;
+    padding-right: 9px;
+  }
+
+  .agenda-booking-time-block strong {
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+
+  .agenda-booking-time-block small {
+    color: #748095;
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+
+  .agenda-booking-content {
+    gap: 5px;
+  }
+
+  .agenda-booking-title-row > strong,
+  .agenda-booking-content > strong {
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.18;
+  }
+
+  .agenda-booking-content > span:not(.agenda-booking-title-row) {
+    color: #4f5c70;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+
+  .agenda-booking-content small {
+    color: #7a8494;
+    font-size: 0.7rem;
+    font-weight: 500;
+  }
+
+  .agenda-cancelled-booking-row {
+    min-height: 48px;
+    padding: 9px 8px 9px 11px;
+  }
+
+  .agenda-booking-side-actions {
+    grid-template-columns: 40px 30px;
+    gap: 5px;
+  }
+
+  .agenda-map-button,
+  .agenda-expand-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 390px) {
+  .admin-calendar-sticky-header .admin-date-strip,
+  .admin-tab-calendar .admin-date-strip {
+    padding-inline: 8px;
+  }
+
+  .admin-tab-calendar .admin-week-date-row {
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    gap: 3px;
+  }
+
+  .admin-tab-calendar .admin-date-pill {
+    min-height: 46px;
+  }
+
+  .agenda-booking-card {
+    padding-inline: 9px 7px;
+  }
+
+  .agenda-booking-side-actions {
+    grid-template-columns: 38px 28px;
+    gap: 3px;
+  }
+}

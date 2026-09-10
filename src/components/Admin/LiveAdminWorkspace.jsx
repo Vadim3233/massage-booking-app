@@ -2016,14 +2016,12 @@ export function LiveAdminWorkspace({
   const [personalEventError, setPersonalEventError] = useState("");
   const [adminActionMessage, setAdminActionMessage] = useState("");
   const [telegramTestStatus, setTelegramTestStatus] = useState({ message: "", sending: false, type: "" });
-  const [compactDateNavVisible, setCompactDateNavVisible] = useState(false);
   const [coverageZoneDraft, setCoverageZoneDraft] = useState(() => ({
     preapproval: coverageZones.preapproval.join(", "),
     usual: coverageZones.usual.join(", "),
   }));
   const agendaDayRefs = useRef({});
   const agendaListRef = useRef(null);
-  const adminDateStripRef = useRef(null);
   const agendaScrollSyncingRef = useRef(false);
   const initialCalendarTodayAnchorRef = useRef(false);
   const threeDayGridRef = useRef(null);
@@ -2297,8 +2295,8 @@ export function LiveAdminWorkspace({
   const normalizedFinancialSettingsDraft = normalizeFinancialSettings(financialSettingsDraft);
 
   function agendaScrollOffset() {
-    const compactNavHeight = document.querySelector(".admin-compact-date-nav")?.getBoundingClientRect().height || 0;
-    return Math.max(18, compactNavHeight + 18);
+    const stickyHeaderHeight = document.querySelector(".admin-calendar-sticky-header")?.getBoundingClientRect().height || 0;
+    return Math.max(18, stickyHeaderHeight + 12);
   }
 
   function scrollAgendaDayIntoView(dayNode, behavior = "smooth") {
@@ -2765,35 +2763,6 @@ export function LiveAdminWorkspace({
       scrollAgendaDayIntoView(selectedAgendaDay, "auto");
     });
   }, [activeTab, calendarMode, pendingAgendaScrollDate, selectedDay.dateValue]);
-
-  useEffect(() => {
-    if (activeTab !== "calendar") {
-      setCompactDateNavVisible(false);
-      return undefined;
-    }
-
-    let frameId = 0;
-    const updateCompactDateNav = () => {
-      frameId = 0;
-      const stripBottom = adminDateStripRef.current?.getBoundingClientRect().bottom ?? 0;
-      setCompactDateNavVisible(window.scrollY > 120 && stripBottom < 8);
-    };
-
-    const handleScroll = () => {
-      if (frameId) return;
-      frameId = window.requestAnimationFrame(updateCompactDateNav);
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleScroll);
-    updateCompactDateNav();
-
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleScroll);
-      if (frameId) window.cancelAnimationFrame(frameId);
-    };
-  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "calendar" || calendarMode !== "agenda" || pendingAgendaScrollDate) return undefined;
@@ -4991,19 +4960,18 @@ export function LiveAdminWorkspace({
 
   return (
     <section className={`admin-app-shell admin-tab-${activeTab}`}>
-      <AdminTopbar
-        activeTab={activeTab}
-        calendarMode={calendarMode}
-        tabs={ADMIN_TABS}
-        onOpenMenu={() => setSideMenuOpen(true)}
-        onSwitchClient={() => onSetActiveView("client")}
-      />
+      <div className={activeTab === "calendar" ? "admin-calendar-sticky-header" : "admin-standard-header"}>
+        <AdminTopbar
+          activeTab={activeTab}
+          calendarMode={calendarMode}
+          tabs={ADMIN_TABS}
+          onOpenMenu={() => setSideMenuOpen(true)}
+          onSwitchClient={() => onSetActiveView("client")}
+        />
 
-      {activeTab === "calendar" && (
-        <AdminCalendarDateNavigation
-          compactDateNavVisible={compactDateNavVisible}
+        {activeTab === "calendar" && (
+          <AdminCalendarDateNavigation
           datePillItems={adminDatePillItems}
-          dateStripRef={adminDateStripRef}
           formatAdminMoney={formatAdminMoney}
           formatAgendaDuration={formatAgendaDuration}
           isTodaySelected={selectedDay.dateValue === currentDateValue}
@@ -5012,8 +4980,9 @@ export function LiveAdminWorkspace({
           onGoToToday={goToToday}
           onShiftWeek={shiftAdminDateStripWeek}
           weekSummary={adminWeekSummary}
-        />
-      )}
+          />
+        )}
+      </div>
 
       {sideMenuOpen && (
         <div className="admin-menu-backdrop" role="presentation" onClick={() => setSideMenuOpen(false)}>

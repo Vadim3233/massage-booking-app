@@ -2,9 +2,7 @@ import React from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
 export function AdminCalendarDateNavigation({
-  compactDateNavVisible,
   datePillItems,
-  dateStripRef,
   formatAdminMoney,
   formatAgendaDuration,
   isTodaySelected,
@@ -14,16 +12,16 @@ export function AdminCalendarDateNavigation({
   onShiftWeek,
   weekSummary,
 }) {
-  function renderAdminWeekDateControls({ compact = false } = {}) {
+  function renderAdminWeekDateControls() {
     return (
-      <div className={`admin-week-date-row${compact ? " compact-admin-week-date-row" : ""}`}>
+      <div className="admin-week-date-row">
         <button
           type="button"
           className="admin-week-nav-button"
           aria-label="Previous week"
           onClick={() => onShiftWeek(-7)}
         >
-          <ChevronLeft aria-hidden="true" size={compact ? 15 : 17} />
+          <ChevronLeft aria-hidden="true" size={17} />
         </button>
         <div className="admin-week-date-pills">
           {datePillItems.map((day) => (
@@ -54,15 +52,14 @@ export function AdminCalendarDateNavigation({
           aria-label="Next week"
           onClick={() => onShiftWeek(7)}
         >
-          <ChevronRight aria-hidden="true" size={compact ? 15 : 17} />
+          <ChevronRight aria-hidden="true" size={17} />
         </button>
       </div>
     );
   }
 
   return (
-    <>
-      <div className="admin-date-strip" aria-label="Choose date" ref={dateStripRef}>
+      <div className="admin-date-strip" aria-label="Choose date">
         <p className="admin-date-strip-month">{monthLabel}</p>
         {renderAdminWeekDateControls()}
         <button
@@ -80,26 +77,5 @@ export function AdminCalendarDateNavigation({
           <span>{weekSummary.bookings} booking{weekSummary.bookings === 1 ? "" : "s"}</span>
         </div>
       </div>
-
-      {compactDateNavVisible && (
-        <div className="admin-compact-date-nav visible">
-          <div className="admin-compact-date-nav-inner">
-            <div className="admin-compact-date-label">
-              <span>Week</span>
-              <strong>{monthLabel}</strong>
-            </div>
-            {renderAdminWeekDateControls({ compact: true })}
-            <button
-              type="button"
-              className={isTodaySelected ? "admin-today-jump-button active-admin-today-jump" : "admin-today-jump-button"}
-              onClick={onGoToToday}
-            >
-              <CalendarDays aria-hidden="true" size={14} strokeWidth={2} />
-              Today
-            </button>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
