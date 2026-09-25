@@ -19,7 +19,7 @@ export function PrivacyNotice() {
         <li>Your service address, postcode and any access instructions you provide for a mobile appointment.</li>
         <li>Your massage preferences and optional notes.</li>
         <li>Messages connected with your booking, including email and optional Telegram updates.</li>
-        <li>Security and technical records needed to operate the booking service, such as authentication and request logs.</li>
+        <li>Security and technical records needed to operate the booking service, such as authentication and request logs. The booking app uses browser storage needed to keep you signed in.</li>
       </ul>
       <p>
         The booking form does not ask for a medical history. Please do not put diagnoses or other medical details in the free-text notes.
