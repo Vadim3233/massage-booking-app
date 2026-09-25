@@ -6,35 +6,29 @@ export function TermsOfService() {
     <main className="client-access-page legal-notice-page">
       <span className="client-access-brand">Vad Massage</span>
       <h1>Terms of Service</h1>
-      <p className="client-access-muted">Last updated 7 September 2026</p>
+      <p className="client-access-muted">Last updated 25 September 2026</p>
 
-      <p>These terms apply when you use the Vad Massage booking service to request and manage mobile massage or soft tissue therapy appointments.</p>
+      <p>These terms apply when you use the Vad Massage booking service to request and manage mobile massage or soft tissue therapy appointments. The <a href="https://www.vadmassage.com/terms/">Booking &amp; Treatment Terms</a> explain the appointment, payment, cancellation and treatment rules that apply to your booking.</p>
 
       <h2>Using the booking service</h2>
       <p>
-        Online booking is available to invited or approved clients. Please use your own account, or have the person&apos;s authority if you arrange
+        Online booking is available to registered clients. Please use your own account, or have the person&apos;s authority if you arrange
         an appointment for them. Provide complete and accurate contact, address and appointment information, and keep it up to date.
       </p>
 
       <h2>Appointments</h2>
       <p>
-        A booking request is subject to availability and confirmation. Travel requirements, the service area or another practical issue may mean
-        a requested time cannot be accepted. Vad will contact you if an appointment needs to change.
+        A booking request or held time is subject to availability and confirmation. Travel requirements, the service area or another practical issue may mean a requested time cannot be accepted. Vad will contact you if an appointment needs to change.
       </p>
 
       <h2>Payment</h2>
       <p>
-        You are responsible for the price shown for the appointment and any clearly stated travel or congestion charge. Bank transfer is the main
-        payment method. Selecting “I&apos;ve made the bank transfer” records that you have sent payment; the booking remains awaiting verification until
-        Vad confirms receipt. A request to pay cash is subject to approval and, once approved, payment is due on arrival.
+        The total price, including any travel, congestion or other agreed location charge, is shown before you submit a request. Bank transfer in advance is the normal payment method. Selecting “I&apos;ve made the bank transfer” records that you say payment was sent; it does not confirm the booking or mark it paid. An appointment is confirmed once Vad has received payment and sent a confirmation message. Cash on arrival is available only if Vad expressly agrees and confirms your appointment.
       </p>
 
       <h2>Cancellation and rescheduling</h2>
       <p>
-        Cancellation is normally free up to 24 hours before the appointment. A short grace period may also apply immediately after a booking is made,
-        including for appointments booked within 24 hours. After the applicable free-cancellation period, a cancellation may be charged up to the full
-        appointment fee depending on the circumstances. Rescheduling is subject to availability and the applicable notice period. Contact Vad promptly
-        if the online management option is unavailable.
+        You may cancel or reschedule without charge with at least 24 hours&apos; notice. With less than 24 hours&apos; notice, the full appointment fee is payable for a cancellation, reschedule or no-show, subject to the one-time illness reschedule, applicable statutory cancellation rights and a reduction where Vad fills the time or avoids costs. If cash on arrival was agreed, a late-cancellation fee is payable by bank transfer. The app may offer a short free-cancellation grace period after booking; if it does, you can use that additional option. Rescheduling remains subject to availability. See the <a href="https://www.vadmassage.com/terms/">full terms</a> and contact Vad promptly if online management is unavailable.
       </p>
 
       <h2>Your appointment</h2>
@@ -65,7 +59,7 @@ export function TermsOfService() {
       </p>
 
       <h2>Contact</h2>
-      <p>For booking questions or help with these terms, email <a href="mailto:bookings@vadmassage.com">bookings@vadmassage.com</a>.</p>
+      <p>For booking questions or complaints, email <a href="mailto:bookings@vadmassage.com">bookings@vadmassage.com</a>. The <a href="https://www.vadmassage.com/terms/#complaints">complaints process</a> and postal correspondence details are in the full terms.</p>
 
       <p className="legal-page-links"><a href="/?view=client">Return to booking</a><a href="/privacy">Privacy Notice</a></p>
     </main>
