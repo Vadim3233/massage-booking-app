@@ -4375,8 +4375,8 @@ function ClientBookingInterface({
                         <div>
                           <h2>Cancellation Policy</h2>
                           <p><CheckCircle2 aria-hidden="true" size={18} strokeWidth={2} /> Free cancellation within 1 hour of booking</p>
-                          <p><CheckCircle2 aria-hidden="true" size={18} strokeWidth={2} /> Free cancellation up to 24 hours before your appointment</p>
-                          <p><CheckCircle2 aria-hidden="true" size={18} strokeWidth={2} /> Within 24 hours, the full session fee applies because the time is reserved for you and hard to replace</p>
+                          <p><CheckCircle2 aria-hidden="true" size={18} strokeWidth={2} /> Free cancellation with at least 24 hours’ notice</p>
+                          <p><CheckCircle2 aria-hidden="true" size={18} strokeWidth={2} /> Within 24 hours, the full session fee applies, subject to illness rescheduling, statutory rights and any reduction if I fill the time or avoid costs. <a href="https://www.vadmassage.com/terms/" target="_blank" rel="noopener noreferrer">Read the full booking terms</a></p>
                         </div>
                       </article>
                     </section>
