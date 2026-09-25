@@ -6,11 +6,10 @@ export function PrivacyNotice() {
     <main className="client-access-page legal-notice-page">
       <span className="client-access-brand">Vad Massage</span>
       <h1>Privacy Notice</h1>
-      <p className="client-access-muted">Last updated 7 September 2026</p>
+      <p className="client-access-muted">Last updated 25 September 2026</p>
 
       <p>
-        Vad Massage is the data controller for personal information used to arrange and provide your massage appointments.
-        For privacy questions or requests, email <a href="mailto:bookings@vadmassage.com">bookings@vadmassage.com</a>.
+        Vadim Susarin, trading as VAD Soft Tissue &amp; Massage Therapy, is the data controller for personal information used to arrange and provide your massage appointments. For privacy questions or requests, email <a href="mailto:bookings@vadmassage.com">bookings@vadmassage.com</a> or write to 46A Drayton Gardens, West Drayton, UB7 7LG. The <a href="https://www.vadmassage.com/privacy/">business privacy notice</a> also covers consultations and treatment records.
       </p>
 
       <h2>Information we use</h2>
@@ -20,7 +19,7 @@ export function PrivacyNotice() {
         <li>Your service address, postcode and any access instructions you provide for a mobile appointment.</li>
         <li>Your massage preferences and optional notes.</li>
         <li>Messages connected with your booking, including email and optional Telegram updates.</li>
-        <li>Security and technical records needed to operate the booking service, such as authentication and request logs.</li>
+        <li>Security and technical records needed to operate the booking service, such as authentication and request logs. The booking app uses browser storage needed to keep you signed in.</li>
       </ul>
       <p>
         The booking form does not ask for a medical history. Please do not put diagnoses or other medical details in the free-text notes.
@@ -35,7 +34,7 @@ export function PrivacyNotice() {
         <li>For legitimate interests in running the service, preventing misuse, keeping the system secure and maintaining appropriate business records.</li>
         <li>To meet legal duties, including tax, accounting and data-protection obligations.</li>
       </ul>
-      <p>We do not sell your personal information or use it for behavioural advertising.</p>
+      <p>We do not sell your personal information or use it for behavioural advertising. Consultation and treatment notes, where collected separately from this booking form, are also covered by the business privacy notice.</p>
 
       <h2>Who processes it</h2>
       <p>
