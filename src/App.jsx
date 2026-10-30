@@ -171,6 +171,7 @@ import {
   ClientTimeStep,
   ClientTreatmentStep,
 } from "./components/Booking/ClientBookingFlowScreens.jsx";
+import { AddToCalendarActions } from "./components/Booking/AddToCalendarActions.jsx";
 import { BookingTopbar } from "./components/Booking/BookingTopbar.jsx";
 import { Timeline } from "./components/Calendar/Timeline.jsx";
 import { WaitlistPanel } from "./components/Waitlist/WaitlistPanel.jsx";
@@ -3024,12 +3025,16 @@ function ClientBookingInterface({
       const emailPayload = {
         appointments: appointmentsForConfirmation.map((appointment) => ({
           date: appointment.dateLabel,
+          dateValue: appointment.dateValue,
           durationMinutes: appointment.duration,
+          endMinutes: appointment.end,
+          id: appointment.id,
           items: appointment.items,
           location: appointment.selectedAreaName,
           manageUrl: `mailto:bookings@vadmassage.com?subject=${encodeURIComponent(`Manage booking ${appointment.dateValue} ${minutesToTime(appointment.start)}`)}`,
           price: appointment.total,
           serviceName: appointment.serviceName,
+          startMinutes: appointment.start,
           time: `${minutesToTime(appointment.start)} - ${minutesToTime(appointment.end)}`,
         })),
         customer: customerPayload,
@@ -4034,6 +4039,13 @@ function ClientBookingInterface({
                               <CalendarDays aria-hidden="true" size={22} strokeWidth={1.8} />
                               To reschedule, please contact me directly.
                             </p>
+                            {!isCancelledBooking(appointment) && (
+                              <AddToCalendarActions
+                                appointment={appointment}
+                                confirmed={appointment.status === "confirmed"}
+                                location={appointment.address || contactDetails.address}
+                              />
+                            )}
                           </div>
                         </article>
                       );
@@ -5091,9 +5103,11 @@ function bookingEmailPayload(booking) {
   return {
     address: booking.address || "",
     bookingReference: booking.bookingReference || booking.id || "",
+    bookingId: booking.id || "",
     customer: { name: booking.clientName || "there" },
     date: booking.dateValue || "",
     durationMinutes: booking.duration || 0,
+    endMinutes: booking.sessionEnd ?? (Number(booking.start) + Number(booking.duration || 0)),
     items: itemsForBooking(booking),
     location: booking.location || "",
     paymentMethod: booking.paymentMethod || "",
@@ -5101,6 +5115,8 @@ function bookingEmailPayload(booking) {
     paymentReference: booking.paymentReference || booking.bookingReference || booking.id || "",
     paymentExpiry: booking.paymentExpiry || booking.paymentHoldExpiresAt || null,
     paymentStatus: booking.paymentStatus || "",
+    serviceName: booking.serviceName || "",
+    startMinutes: booking.start,
     status: booking.status || "",
     time: `${minutesToTime(booking.start)} - ${minutesToTime(booking.sessionEnd ?? (Number(booking.start) + Number(booking.duration || 0)))}`,
     total: bookingTotalDue(booking),
