@@ -1,3 +1,4 @@
+import { buildIcs, calendarEventFromAppointment, calendarFileName } from "../src/lib/calendarEvent.js";
 import { sessionPreferenceLabels } from "../src/lib/sessionPreferences.js";
 import { getServerBankTransferDetails } from "./bankTransferDetails.js";
 
@@ -110,6 +111,49 @@ function renderAppointments(appointments = []) {
     .join("");
 }
 
+function formatLongDate(dateValue) {
+  const date = new Date(`${dateValue}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return String(dateValue || "");
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    weekday: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+// One appointment described the way calendarEventFromAppointment expects it.
+function calendarAppointmentFromPayload(payload = {}, appointment = payload) {
+  return {
+    address: payload.address,
+    bookingReference: payload.bookingReference,
+    dateValue: appointment.dateValue,
+    duration: appointment.durationMinutes,
+    end: appointment.endMinutes,
+    id: appointment.id || appointment.bookingId,
+    location: appointment.location || payload.location,
+    serviceName: appointment.serviceName || appointment.items?.[0]?.name,
+    start: appointment.startMinutes,
+  };
+}
+
+// Calendar files for confirmed appointments only. Missing or unusable timing is skipped quietly.
+function calendarAttachments(payload = {}) {
+  const appointments = Array.isArray(payload.appointments) && payload.appointments.length > 0
+    ? payload.appointments.map((appointment) => calendarAppointmentFromPayload(payload, appointment))
+    : [calendarAppointmentFromPayload(payload)];
+  const events = appointments
+    .map((appointment) => calendarEventFromAppointment(appointment, { confirmed: true }))
+    .filter(Boolean);
+
+  return events.map((event, index) => ({
+    content: buildIcs(event),
+    contentType: "text/calendar; charset=utf-8",
+    filename: events.length > 1 ? calendarFileName(event).replace(".ics", `-${index + 1}.ics`) : calendarFileName(event),
+  }));
+}
+
 function layout(title, body) {
   return `<!doctype html>
 <html>
@@ -183,6 +227,12 @@ export const emailTemplates = {
       (payload.status === "payment_method_review" && payload.paymentMethod === "alternative_requested")
     );
 
+    const isConfirmedBooking = !isPending && !isAlternative && !isCashAwaitingApproval;
+    const attachments = isConfirmedBooking ? calendarAttachments(payload) : [];
+    const calendarNote = attachments.length > 0
+      ? `<p>${attachments.length > 1 ? "Your appointments are attached as calendar files. Open them" : "Your appointment is attached as a calendar file. Open it"} on your phone and choose Add to Calendar.</p>`
+      : "";
+
     const paymentInstructions = isCashOnArrival ? `
       <h2 style="font-size:18px;">Payment details</h2>
       <ul>
@@ -202,6 +252,7 @@ export const emailTemplates = {
       <p>Hi ${escapeHtml(customerName)},</p>
       <p>${isCashAwaitingApproval ? "I've received your cash payment request and I'll confirm shortly." : isCashApproved ? "Your booking is confirmed. Payment is due on arrival." : isPending ? "I've received your booking. Your appointment is reserved while you complete payment." : isAlternative ? "I've received your payment request and I'll be in touch." : (appointments.length > 1 ? "Your appointments are confirmed." : "Your booking is confirmed.")}</p>
       ${appointmentsBody}
+      ${calendarNote}
       ${renderSessionPreferences(payload)}
       <p><strong>Total:</strong> ${formatMoney(payload.total)}</p>
       ${isCashOnArrival || isPending ? paymentInstructions : isAlternative ? `<p>I'll contact you about the payment arrangements.</p>${paymentInstructions}` : ""}
@@ -252,9 +303,10 @@ export const emailTemplates = {
               : `Your booking is confirmed for ${payload.date} at ${payload.time}. Total: ${formatMoney(payload.total)}.`);
 
     return {
+      ...(attachments.length > 0 ? { attachments } : {}),
       html: layout(subject, body),
       subject,
-      text: [text, sessionPreferenceText].filter(Boolean).join(" "),
+      text: [text, sessionPreferenceText, attachments.length > 0 ? "A calendar file is attached." : ""].filter(Boolean).join(" "),
     };
   },
 
@@ -265,12 +317,13 @@ export const emailTemplates = {
         <li><strong>Date:</strong> ${escapeHtml(payload.date)}</li>
         <li><strong>Time:</strong> ${escapeHtml(payload.time)}</li>
       </ul>
+      <p>If you added this appointment to your calendar, please remember to remove it.</p>
     `;
 
     return {
       html: layout("Booking cancelled", body),
       subject: "Your booking has been cancelled",
-      text: `Your booking cancellation has been confirmed for ${payload.date} at ${payload.time}.`,
+      text: `Your booking cancellation has been confirmed for ${payload.date} at ${payload.time}. If you added this appointment to your calendar, please remember to remove it.`,
     };
   },
 
@@ -293,8 +346,14 @@ export const emailTemplates = {
   },
 
   receipt(payload = {}) {
+    // A receipt goes out when the booking is confirmed, so it also carries the calendar file.
+    const attachments = payload.status === "confirmed" ? calendarAttachments(payload) : [];
+    const calendarNote = attachments.length > 0
+      ? `<p>Your appointment is confirmed for ${escapeHtml(formatLongDate(payload.dateValue))}, ${escapeHtml(payload.time)}. It is attached as a calendar file: open it on your phone and choose Add to Calendar.</p>`
+      : "";
     const body = `
       <p>Thanks for your payment. Here is your receipt.</p>
+      ${calendarNote}
       <ul>
         <li><strong>Reference:</strong> ${escapeHtml(payload.bookingReference || payload.paymentReference || payload.orderId || payload.id || "-")}</li>
         <li><strong>Payment method:</strong> ${escapeHtml(payload.paymentMethod || "-")}</li>
@@ -305,9 +364,10 @@ export const emailTemplates = {
     `;
 
     return {
+      ...(attachments.length > 0 ? { attachments } : {}),
       html: layout("Receipt", body),
       subject: "Your booking receipt",
-      text: `Receipt ${payload.bookingReference || payload.paymentReference || ""}. Total paid: ${formatMoney(payload.total)}.`,
+      text: `Receipt ${payload.bookingReference || payload.paymentReference || ""}. Total paid: ${formatMoney(payload.total)}.${attachments.length > 0 ? " Your appointment is confirmed and a calendar file is attached." : ""}`,
     };
   },
 };

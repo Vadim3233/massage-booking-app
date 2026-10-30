@@ -23,9 +23,29 @@ function templateFor(type) {
   return template;
 }
 
-async function sendWithResend({ apiKey, from, html, replyTo, subject, text, to }) {
+function base64Content(content) {
+  return Buffer.from(String(content ?? ""), "utf8").toString("base64");
+}
+
+async function sendWithResend({ apiKey, attachments = [], from, html, replyTo, subject, text, to }) {
   const response = await fetch("https://api.resend.com/emails", {
-    body: JSON.stringify({ from, html, reply_to: replyTo, subject, text, to }),
+    body: JSON.stringify({
+      ...(attachments.length > 0
+        ? {
+          attachments: attachments.map((file) => ({
+            content: base64Content(file.content),
+            content_type: file.contentType,
+            filename: file.filename,
+          })),
+        }
+        : {}),
+      from,
+      html,
+      reply_to: replyTo,
+      subject,
+      text,
+      to,
+    }),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -41,9 +61,19 @@ async function sendWithResend({ apiKey, from, html, replyTo, subject, text, to }
   return payload;
 }
 
-async function sendWithSendGrid({ apiKey, from, html, replyTo, subject, text, to }) {
+async function sendWithSendGrid({ apiKey, attachments = [], from, html, replyTo, subject, text, to }) {
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     body: JSON.stringify({
+      ...(attachments.length > 0
+        ? {
+          attachments: attachments.map((file) => ({
+            content: base64Content(file.content),
+            disposition: "attachment",
+            filename: file.filename,
+            type: file.contentType,
+          })),
+        }
+        : {}),
       content: [
         { type: "text/plain", value: text },
         { type: "text/html", value: html },
